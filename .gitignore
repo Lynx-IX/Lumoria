@@ -1,0 +1,23 @@
+# Python and the local environment
+.venv/
+__pycache__/
+*.pyc
+
+# build output (build.py)
+build/
+dist/
+installer/
+
+# personal data: your looks, settings, MIDI links, crash log (the installed app keeps these in %APPDATA%\Lumoria)
+presets/
+ui_settings.json
+midi_map.json
+crash.log
+.running
+*.lumoria-look
+*.lumoria-playlist
+
+# editor / assistant settings
+.claude/
+.vscode/
+.idea/

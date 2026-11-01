@@ -1,0 +1,15 @@
+moderngl==5.13.0
+glfw==2.11.0
+imgui-bundle==1.93.0
+PyOpenGL==3.1.10
+numpy==2.5.4
+opencv-python==5.0.0.93
+sounddevice==0.5.6
+cv2-enumerate-cameras==1.4.0
+onnxruntime-directml==1.24.4
+mss==10.2.0
+windows-capture==2.0.1
+av==19.0.2
+comtypes==1.4.17
+# building the installer: pyinstaller==6.22.3 (and Inno Setup 6)
+# plus models/rvm_mobilenetv3_fp32.onnx from github.com/PeterL1n/RobustVideoMatting releases (v1.0.0)

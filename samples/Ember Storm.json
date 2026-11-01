@@ -1,0 +1,139 @@
+{
+ "version": 2,
+ "band": "bass",
+ "gain": 1.0,
+ "effects": [
+  {
+   "id": "looks",
+   "on": true,
+   "amt": 0.8,
+   "mod": 0,
+   "opacity": 1.0,
+   "blend": 0,
+   "centre": [
+    0.5,
+    0.5
+   ],
+   "opts": [
+    11
+   ],
+   "params": [
+    0.15,
+    0.35,
+    0.15
+   ],
+   "speed": 1.0,
+   "target": 0,
+   "expanded": false,
+   "colours": [
+    [
+     1.0,
+     0.16,
+     0.6
+    ],
+    [
+     0.55,
+     0.2,
+     1.0
+    ],
+    [
+     0.0,
+     0.9,
+     1.0
+    ]
+   ],
+   "keep_out": false
+  },
+  {
+   "id": "particles",
+   "on": true,
+   "amt": 0.7,
+   "mod": 0,
+   "opacity": 1.0,
+   "blend": 0,
+   "centre": [
+    0.5,
+    0.5
+   ],
+   "opts": [
+    1,
+    0,
+    0,
+    0,
+    1
+   ],
+   "params": [
+    0.5,
+    0.6,
+    0.0,
+    0.7
+   ],
+   "speed": 1.0,
+   "target": 0,
+   "expanded": false,
+   "colours": [
+    [
+     1.0,
+     0.16,
+     0.6
+    ],
+    [
+     0.55,
+     0.2,
+     1.0
+    ],
+    [
+     0.0,
+     0.9,
+     1.0
+    ]
+   ],
+   "keep_out": false
+  },
+  {
+   "id": "leaks",
+   "on": true,
+   "amt": 0.55,
+   "mod": 0,
+   "opacity": 1.0,
+   "blend": 0,
+   "centre": [
+    0.5,
+    0.5
+   ],
+   "opts": [
+    1,
+    10,
+    1,
+    1
+   ],
+   "params": [
+    0.5,
+    0.5,
+    0.5,
+    0.3
+   ],
+   "speed": 1.0,
+   "target": 0,
+   "expanded": false,
+   "colours": [
+    [
+     1.0,
+     0.16,
+     0.6
+    ],
+    [
+     0.55,
+     0.2,
+     1.0
+    ],
+    [
+     0.0,
+     0.9,
+     1.0
+    ]
+   ],
+   "keep_out": false
+  }
+ ]
+}

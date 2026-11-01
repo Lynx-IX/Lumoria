@@ -1,0 +1,188 @@
+<p align="center"><img src="assets/lumoria_symbol.png" width="120" alt=""><br>
+<img src="assets/lumoria_wordmark.png" width="360" alt="Lumoria"></p>
+
+<p align="center"><b>Visual FX Engine</b>: real-time GPU video effects for streams, music and live visuals.</p>
+
+![Lumoria running the Neon Lines look](docs/screenshot.png)
+
+Lumoria takes your camera, a screen, a window or a video, runs it through a chain of GPU effects that react to
+your music, and sends the result to OBS (Spout, window capture or the OBS Virtual Camera) or straight to a video
+file. Build looks, line them up in a playlist and fire them live, on the beat.
+
+## Features
+- **48 GPU effects**: neon edges, kaleidoscope, glitch, datamosh, tracers, warp, film looks, colour grading,
+  visualizers and more, stacked in any order, each set to manual, audio-reactive or a wave.
+- **AI person cut-out** (Robust Video Matting on the GPU): put effects on you, on the background or both; erase
+  or replace the background; cut people out of several sources onto one scene.
+- **Interactive effects** that react to your movement: smoke, flames, water ripples, light painting, settling
+  snow, pin art, touch-to-pop bubbles.
+- **Music-driven**: follows any input or *what you hear* on the PC; a beat clock from the audio, tap tempo,
+  manual BPM or MIDI clock from your DAW; timing in seconds, beats or bars.
+- **Looks and playlist**: save whole setups as looks, crossfade or morph between them, auto-play by time or
+  beats, import and export looks to share.
+- **Sources**: cameras, video files, images, whole screens and single windows at 30 or 60 fps, cropped and
+  placed anywhere, each with its own effects.
+- **Outputs**: Spout (full quality, straight from the GPU, transparency included), an output window for OBS
+  window capture, the OBS Virtual Camera, and recording to MP4 / MOV with sound on the graphics card's encoder.
+- **Made for performing**: MIDI learn for any control, undo / redo, crash recovery, themes and a console-style
+  interface.
+
+![The Kaleido Dream look](docs/screenshot-kaleido.png)
+
+## Download
+Get the Windows installer from the [Releases](../../releases) page. No admin rights needed; your looks and
+settings live in `%APPDATA%\Lumoria` and survive updates. After installing, *Lumoria Self-Test* in the Start menu
+checks your PC (graphics, AI mask, capture, recording) and writes a short report.
+
+**Needs:** Windows 10 or 11 (64-bit) and a graphics card with OpenGL 3.3 and DirectX 12 (anything from the last
+several years: NVIDIA, AMD or Intel). OBS Studio is optional; the Spout2 plugin for OBS gives the best quality.
+
+## Getting it into OBS
+- **Spout (best quality):** press **Spout** in Lumoria's top bar, then in OBS add a *Spout2 Capture* source
+  (from the [Spout2 plugin for OBS](https://github.com/Off-World-Live/obs-spout2-plugin)) and pick *Lumoria*.
+  Full resolution straight from the graphics card, and a transparent background (Background Eraser set to
+  *Transparent*) stays transparent.
+- **Window Capture:** Add Source → Window Capture → *Lumoria Output*, capture method *Windows 10 (1903 and up)*.
+  Keep the output window open (it can sit behind other windows, just not minimised).
+- **Virtual cam** (top bar): for Discord, Zoom and browsers, through the OBS Virtual Camera device (installed
+  with OBS). Don't also press OBS's own *Start Virtual Camera*.
+
+## Recording
+**Rec** in the top bar (or `R`, or a MIDI pad: *Record on / off*) records the output to a video file, with a running
+timer on the button. Settings > Output picks the format (*MP4 (H.264)*: plays and edits everywhere; *MP4 small*:
+a third of the size; *MOV for editing*: MJPEG frames + uncompressed sound, large), the rate (30 / 60 fps), *Sound*
+and the folder (default Videos\Lumoria). *Sound* records the audio input picked under Audio into the same file
+(use Voicemeeter or a loopback input to record what you hear). The file plays back at real speed even if Lumoria
+dips below the recording rate. Writing happens in a small helper process with the graphics card's own encoder
+(NVENC / AMF / Quick Sync, else Windows or x264), so recording doesn't slow the show; it starts about 0.2 s after
+the press while the encoder starts. Transparent backgrounds aren't kept in recordings (use Spout into OBS).
+
+## First run
+A welcome window helps pick a camera and gives a five-line tour; a new install starts with 8 sample looks
+(Neon Lines, Kaleido Dream, Warp Speed, Comic Book, Matrix, Old Film, Ember Storm, Glitch VHS) in the playlist.
+They live in `samples/`; the welcome (Settings > About > Show the welcome again) can add any that are missing.
+
+## The layout
+- **Top bar:** source, resolution/fps, and keys for MIDI learn, Rec, Flip (preview only), Output window, Spout,
+  fullscreen, Virtual cam and the theme palette.
+- **Sidebar:** Input, Audio, Effects, Transitions, Output.
+- **Effects:** *+ Add effect* opens the library (searchable, grouped). Each effect in the chain is a card:
+  drag the grip to reorder, power to bypass, the mode icon cycles **manual → audio → wave**,
+  the arrow opens its settings (amount, opacity, blend mode, centre, speed and its own options), × removes it.
+  The ⧉ button (or right-click > *Duplicate*) adds an independent copy ("Neon Edges 2") with the same settings,
+  e.g. to run one effect on the subject and a differently set copy on the background. Copies save with looks.
+- **Playlist (bottom):** saved looks as tiles. A look is a snapshot of the whole effect chain: build one in the
+  sidebar, then press **Save look** (or the **+ Save current look** tile). Click a tile to fire it (with the current
+  transition), drag to reorder, right-click to overwrite or delete. Play runs through the playlist (or random looks)
+  every N seconds or beats. Switching looks (by clicking or auto-play) is a real crossfade: the old look keeps
+  running while the new one comes in. The sidebar's *Transitions* sets the default; right-click a tile >
+  *Transition* to give a look its own (Dissolve / Grow / Cut / Wipe / Flash) and its own transition time, plus an
+  optional auto-play stay time.
+  **Import / Export** (playlist bar) share or back up looks as files: *Export* saves the whole playlist to one
+  `.lumoria-playlist`, right-click a tile > *Export this look* saves one `.lumoria-look`. *Import* adds the looks
+  in such files to the end of your playlist (with their transitions and timing); a name you already use gets
+  a number, so nothing is overwritten. Looks don't include sources, so they work on anyone's setup.
+- **Sources:** *Input* has the main source plus Source 2-4 (cameras, video files, images, screen capture).
+  Screens and windows capture at 30 or 60 fps. Capture uses DXGI desktop duplication (the same method as OBS's
+  Display Capture: very little CPU), so a full 1440p screen keeps up at 60. Windows have *Fast* (cut from that
+  screen capture, so keep the window visible) or *Behind others* (keeps working while covered, slower for big
+  windows). The self-test reports whether fast capture works on a PC; where it doesn't, capture falls back to the
+  older way (about 30 fps).
+  Add a *Media Layer* effect (Sources) to put one into the chain: Fill / Fit inside / Stretch, size, position
+  (Centre or Pick), rotation, rounded corners, neon border. Fill + *Apply to: Background* puts a video behind
+  you; inside a group it can have its own effects. Sources are remembered between launches.
+  To give one video its own effects without touching anything else, set a group's *Start from* to that
+  source (Source 2-4): its effects then work on that video alone, and the group places the result in the
+  picture with Size / Fit / Position (Pick) / Rotate / Rounded / Border, like a Media Layer.
+- **AI Mask** (sidebar): quality (Fast / Balanced / High / Max), Edge refine (a guided filter that snaps the AI's
+  edge onto the real edges in the camera image) and Stability (less edge flicker). Shared by Background Eraser,
+  Tracers, Neon Edges' person outline and every effect's *Apply to*. *Show mask on preview* helps tuning.
+- **Auto-save:** the current setup is saved every few seconds and on exit (`presets/_session.json`) and comes
+  back on the next launch, including after *Update ready - restart*. Save a look to keep a setup permanently.
+- **Resizing:** drag the lines between panels; *Interface → UI size* (or Ctrl + mouse wheel) scales all text and
+  controls. The layout is remembered in `ui_settings.json`.
+- **Themes:** the palette button at the right of the top bar picks a theme (Console, Neon, Midnight, Analog,
+  Carbon) and the Lights colour. *Interface → Theme keys* can show them as a strip of keys in the top bar instead.
+- **Logo:** *Interface → Logo* switches between *Original* (the glossy artwork, the default), *Neon* (a redrawn
+  crisp version with a white wordmark) and *Neon colour* (gradient wordmark); the window icon follows after a restart.
+
+## Logo files
+`assets/svg/` holds the Neon logo as vector art: the symbol with glow, flat and one-colour, the app icon tile (and a bolder
+small one for 16-32 px), and the wordmark in white and gradient. `python assets/make_logo.py` draws them all from one
+set of shapes and renders them as `assets/*_neon.*`. The original artwork keeps the plain names (`lumoria.ico`,
+`lumoria_icon.png`, ...) and is what the installer uses.
+
+## Audio react
+Pick an input under *Audio* (it's remembered for next time). To follow music playing on the PC, pick an output
+under *What you hear* at the bottom of the list (Windows' default output first): Lumoria listens to what that device
+plays, like OBS's Desktop Audio, with no extra software. A loopback input (e.g. *Loopback Mix (MOTU M Series)* or
+a Voicemeeter Out) works too. Effects set to **audio** follow the chosen band; recordings take their sound from
+the same input.
+Beat effects (Glitch *On the beat*, Bubbles *Pop on beat*, Datamosh *On the beat*, visualizer rings, Neon
+Shapes' beat pulse, *Audio* colour motion) follow the bass beat; with no input they tick at 120 BPM.
+
+## Tempo
+One beat clock drives beat effects, auto-play and look timing (Settings > Tempo; live in the playlist bar).
+Source: **Audio** (follows the bass, steady through quiet parts), **Tap** (`T`, the TAP button or a MIDI pad),
+**Manual** BPM, or **MIDI clock** from a DAW (send clock to a MIDI port Lumoria can see; for a DAW on this PC a
+virtual port such as loopMIDI; Start = beat 1). `B` makes the current beat beat 1 of the bar. Transition times,
+a look's stay time and the auto-play interval can be in **seconds, beats or bars**. **Launch** (now / beat /
+bar) makes a fired look wait for the next beat or bar, with a countdown on its tile.
+
+## Interactive effects
+The *Interactive* category reacts to you, through the AI mask (Source: Person) or anything moving in the
+picture (Source: Any movement): **Particles**, **Smoke** and **Flames** (a small fluid your movement stirs),
+**Water Ripples** (a wave simulation, with rain or beat drops), **Light Painting** (movement or bright lights
+leave glowing strokes), **Snow That Settles** (snow / ash / petals pile on you and slide off when you move),
+**Pin Art** (a pin field showing the picture, bulging away from you), and Bubbles' *Ending: Pop when touched*.
+
+## Colours
+Every effect with a colour choice uses the same palettes: Rainbow, Neon cyan / magenta, White, Source colour,
+Synthwave, Vaporwave, Fire, Ice, Toxic, Sunset, Ocean, Gold, Terminal green, and **Custom** (swatches appear
+under the dropdown: click one to pick a colour, **+** / **−** to use 2 to 8 colours, right-click a swatch to remove
+it). *Colour motion*: Static, Cycle (through the palette over time), Flow (moving across the picture), Audio
+(shifts with the music), Radial (rings outward), Spiral, Rise (bands moving up), Breathe (everything swings
+together), Beat jump (next colour on each beat) or Drift (slow wandering blobs).
+
+To grade the picture itself (Colour category): **Colour Adjust** has Brightness, Contrast, Saturation, Hue, Warmth
+and Shadows (each 0 = unchanged; double-click a slider to type a value), and **Film Looks** has one-click styles
+(Sepia, Black & white, Noir, Vintage, Old film, Polaroid, Teal & orange, Bleach bypass, Cross-process,
+Technicolor, Cool blue, Golden hour, Lomo, Cyberpunk, Infrared, Night vision) with Grain, Vignette and Fade.
+Strength blends either one with the original.
+
+## Keys (control window)
+`1`–`0` toggle the first ten effects in the chain · `X` randomize · `C` clear ·
+`Space` play/pause the playlist · `←` / `→` (or `N`) previous / next look · `M` flip preview ·
+`O` show/hide output window · `R` record on / off · `F11` output fullscreen (also double-click the output window; `Esc` exits)
+
+## Adding effects
+Effects are GLSL fragment shaders in `effects.py`; add a dict to `EFFECTS` (and a category in `_CAT`)
+and it shows up in the library with its sliders and dropdowns.
+
+## Building from source
+Lumoria is Python. With Python 3.14 (64-bit) on Windows:
+
+```
+python -m venv .venv
+.venv\Scripts\pip install -r requirements.txt
+.venv\Scripts\python app.py
+```
+
+(`run.bat` starts it too.) Running from source keeps looks and settings in the project folder (`presets/`,
+`ui_settings.json`, `midi_map.json`), which `.gitignore` keeps out of git.
+
+`.venv\Scripts\pip install pyinstaller` and then `.venv\Scripts\python build.py` build `dist\Lumoria\Lumoria.exe`
+(PyInstaller) and, if Inno Setup 6 is installed, `installer\Lumoria-Setup-<version>.exe` (Start menu, optional
+desktop icon, uninstaller; no admin needed). The version is `VERSION` in `shared.py`. The installed app keeps
+looks, settings and MIDI links in `%APPDATA%\Lumoria` (kept on uninstall). Check a build with `Lumoria.exe --selftest`: it runs a few seconds with the AI mask, an effect and Spout
+on, writes `%TEMP%\LumoriaSelftest\selftest.json`, and quits, without touching your own looks.
+
+## License
+Lumoria is free software under the [GNU General Public License v3.0](LICENSE): you can use it, share it, change
+it and sell it, as long as what you pass on stays under the same licence with its source available. The AI mask
+model (Robust Video Matting, see `models/README.md`) is GPL-3.0; the x264 encoder bundled through PyAV is GPL;
+everything else Lumoria builds on is under permissive licences (listed in Settings > About).
+
+## Support
+Lumoria is made by one person. If it's part of your shows or streams, buying the installer or a tip helps keep
+it going.

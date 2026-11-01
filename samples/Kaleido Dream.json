@@ -1,0 +1,83 @@
+{
+ "version": 2,
+ "band": "bass",
+ "gain": 1.0,
+ "effects": [
+  {
+   "id": "kaleido",
+   "on": true,
+   "amt": 0.55,
+   "mod": 0,
+   "opacity": 1.0,
+   "blend": 0,
+   "centre": [
+    0.5,
+    0.5
+   ],
+   "opts": [
+    0
+   ],
+   "params": [
+    0.45
+   ],
+   "speed": 1.0,
+   "target": 0,
+   "expanded": false,
+   "colours": [
+    [
+     1.0,
+     0.16,
+     0.6
+    ],
+    [
+     0.55,
+     0.2,
+     1.0
+    ],
+    [
+     0.0,
+     0.9,
+     1.0
+    ]
+   ],
+   "keep_out": false
+  },
+  {
+   "id": "glow",
+   "on": true,
+   "amt": 0.55,
+   "mod": 0,
+   "opacity": 1.0,
+   "blend": 0,
+   "centre": [
+    0.5,
+    0.5
+   ],
+   "opts": [],
+   "params": [
+    0.35
+   ],
+   "speed": 1.0,
+   "target": 0,
+   "expanded": false,
+   "colours": [
+    [
+     1.0,
+     0.16,
+     0.6
+    ],
+    [
+     0.55,
+     0.2,
+     1.0
+    ],
+    [
+     0.0,
+     0.9,
+     1.0
+    ]
+   ],
+   "keep_out": false
+  }
+ ]
+}

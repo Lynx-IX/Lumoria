@@ -6,7 +6,7 @@ import sys
 # which may be read-only (Program Files), so looks, settings, MIDI links and logs live in %APPDATA%\Lumoria.
 # Run from source: both are this folder.
 VERSION = "0.9.0"   # Lumoria's version (build.py reads it from here for the installer)
-SOURCE_URL = ""      # where the source code lives (GitHub); Settings > About links to it once set
+SOURCE_URL = "https://github.com/Lynx-IX/Lumoria"   # Settings > About links to it
 SUPPORT_URL = ""     # a tip / support page (Ko-fi); Settings > About shows a Support button once set
 FROZEN = getattr(sys, "frozen", False)
 HERE = getattr(sys, "_MEIPASS", "") if FROZEN else os.path.dirname(os.path.abspath(__file__))

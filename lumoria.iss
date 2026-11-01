@@ -36,6 +36,8 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 
 [Files]
 Source: "dist\Lumoria\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+; the GPL travels with the program
+Source: "LICENSE"; DestDir: "{app}"; DestName: "LICENSE.txt"; Flags: ignoreversion
 
 [Icons]
 Name: "{autoprograms}\Lumoria"; Filename: "{app}\Lumoria.exe"; Comment: "Lumoria Visual FX Engine"; AppUserModelID: "Lumoria.VisualFXEngine"

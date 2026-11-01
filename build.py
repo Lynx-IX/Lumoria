@@ -20,7 +20,7 @@ def pyinstaller():
             "--name", "Lumoria", "--icon", os.path.join(HERE, "assets", "lumoria.ico"),
             "--distpath", "dist", "--workpath", "build", "--specpath", "build",
             "--add-data", f"{HERE}/assets;assets", "--add-data", f"{HERE}/models;models",
-            "--add-data", f"{HERE}/samples;samples", "--add-data", f"{HERE}/LICENSE;."]
+            "--add-data", f"{HERE}/samples;samples"]
     # packages with DLLs or data files PyInstaller can't see by reading the code
     for pkg in ("imgui_bundle", "onnxruntime", "glfw", "cv2_enumerate_cameras", "sounddevice",
                 "mss", "windows_capture", "av"):

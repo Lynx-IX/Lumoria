@@ -151,9 +151,14 @@ Technicolor, Cool blue, Golden hour, Lomo, Cyberpunk, Infrared, Night vision) wi
 Strength blends either one with the original.
 
 ## Keys (control window)
-`1`–`0` toggle the first ten effects in the chain · `X` randomize · `C` clear ·
-`Space` play/pause the playlist · `←` / `→` (or `N`) previous / next look · `M` flip preview ·
-`O` show/hide output window · `R` record on / off · `F11` output fullscreen (also double-click the output window; `Esc` exits)
+`F1` shows them all in the app.
+- **Looks:** `←` / `→` (or `N`) previous / next · `Home` / `End` first / last · `Space` play / pause the playlist ·
+  `Delete` delete the highlighted look (asks first: `Enter` deletes, `Esc` keeps it) · `Ctrl+S` save the chain as
+  a new look · `Ctrl+I` / `Ctrl+E` import / export looks
+- **Effects:** `1`–`0` toggle the first ten effects · `X` randomize · `C` clear · `Ctrl+Z` / `Ctrl+Y` undo / redo
+- **Tempo:** `T` tap · `B` this beat is beat 1 of the bar
+- **Output:** `R` record on / off · `O` show / hide the output window · `F11` output fullscreen (also double-click
+  the output window; `Esc` exits) · `M` flip the preview
 
 ## Adding effects
 Effects are GLSL fragment shaders in `effects.py`; add a dict to `EFFECTS` (and a category in `_CAT`)

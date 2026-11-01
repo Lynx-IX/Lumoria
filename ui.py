@@ -126,6 +126,8 @@ class _State:
     side_tab = 0                   # sidebar tab: 0 Effects, 1 Settings
     welcomed = False               # the welcome window has been seen (Settings > About shows it again)
     welcome_open = False
+    confirm_delete = None          # a look waiting for "Delete it?" to be answered
+    show_keys = False              # F1: the keyboard shortcuts sheet
     brand = None                   # (small symbol, large symbol, wordmark) textures from assets/, loaded on first use
     lcd_end = 0.0                  # where the top bar's readout ends (theme keys go after it)
     thumbs = {}                    # look name -> (texture, file time) for playlist tile thumbnails
@@ -626,6 +628,8 @@ def draw(app):
 
     restore_prompt(app)
     welcome(app)
+    delete_prompt(app)
+    keys_sheet()
 
     if S.pending_move:   # applied after drawing so lists don't change mid-loop
         uid, dest, index = S.pending_move
@@ -780,12 +784,29 @@ def shortcuts(app):
     if io.want_text_input:
         return
     pressed = lambda k: imgui.is_key_pressed(k, False)
+    if imgui.is_popup_open("", imgui.PopupFlags_.any_popup):   # a prompt or menu has the keys
+        return
     if io.key_ctrl:   # Ctrl+Z undo, Ctrl+Y / Ctrl+Shift+Z redo (and no plain-key shortcuts while Ctrl is held)
         if pressed(imgui.Key.z):
             app.undo(redo=io.key_shift)
         elif pressed(imgui.Key.y):
             app.undo(redo=True)
+        elif pressed(imgui.Key.s):
+            S.open_save = True
+        elif pressed(imgui.Key.i):
+            app.ask_import()
+        elif pressed(imgui.Key.e):
+            app.ask_export()
         return
+    if pressed(imgui.Key.f1):
+        S.show_keys = True
+    if pressed(imgui.Key.delete):
+        if app.current_preset in app.playlist:
+            S.confirm_delete = app.current_preset
+        else:
+            app.flash("Click a look in the playlist first, then Delete removes it.", 3)
+    if app.playlist and (pressed(imgui.Key.home) or pressed(imgui.Key.end)):
+        app.load_preset(app.playlist[0 if pressed(imgui.Key.home) else -1])
     chain = [f for f in app.pipe.order if not f.removing]
     for n in range(10):
         if pressed(getattr(imgui.Key, f"_{n}")):
@@ -816,6 +837,81 @@ def shortcuts(app):
     if pressed(imgui.Key.f11):
         app.out_win.set_visible(True)
         app.out_win.toggle_fullscreen()
+
+
+def delete_prompt(app):
+    """'Delete look X?': Enter or the Delete button confirms, Esc or Cancel keeps it."""
+    name = S.confirm_delete
+    if name is None:
+        return
+    if not imgui.is_popup_open("Delete look"):
+        imgui.open_popup("Delete look")
+    vp = imgui.get_main_viewport()
+    imgui.set_next_window_pos(V(vp.pos.x + vp.size.x / 2, vp.pos.y + vp.size.y / 2), 0, V(0.5, 0.5))
+    if not imgui.begin_popup_modal("Delete look", None, imgui.WindowFlags_.always_auto_resize
+                                   | imgui.WindowFlags_.no_title_bar | imgui.WindowFlags_.no_move)[0]:
+        S.confirm_delete = None
+        return
+    bold(f"Delete \"{name}\"?", 16)
+    imgui.text_colored(DIM, "It's removed from the playlist and from disk (export it first to keep a copy).")
+    imgui.spacing()
+    w = sc(150)
+    yes = neon_button(f"{fa.ICON_FA_TRASH}  Delete  [Enter]##del", RED, V(w, 0))
+    imgui.same_line(0, 8)
+    no = neon_button("Cancel  [Esc]##keep", DIM, V(w, 0))
+    pressed = lambda k: imgui.is_key_pressed(k, False)
+    # not the Delete key: the press that opened this prompt would confirm it straight away
+    if yes or pressed(imgui.Key.enter) or pressed(imgui.Key.keypad_enter):
+        app.delete_preset(name)
+        app.flash(f"Deleted {name}", 3)
+        S.confirm_delete = None
+        imgui.close_current_popup()
+    elif no or pressed(imgui.Key.escape):
+        S.confirm_delete = None
+        imgui.close_current_popup()
+    imgui.end_popup()
+
+
+KEYS = [("Looks", [("Click a tile", "fire that look"), ("<- / ->  or  N", "previous / next look"),
+                   ("Home / End", "first / last look"), ("Space", "play / pause the playlist"),
+                   ("Delete", "delete the highlighted look (asks first)"), ("Ctrl+S", "save the chain as a new look"),
+                   ("Ctrl+I / Ctrl+E", "import / export looks")]),
+        ("Effects", [("1 - 0", "turn the first ten effects on / off"), ("X", "randomize"), ("C", "clear the chain"),
+                     ("Ctrl+Z / Ctrl+Y", "undo / redo")]),
+        ("Tempo", [("T", "tap tempo"), ("B", "this beat is beat 1 of the bar")]),
+        ("Output", [("R", "record on / off"), ("O", "show / hide the output window"),
+                    ("F11", "output fullscreen (Esc leaves)"), ("M", "flip the preview (only for you)")]),
+        ("Help", [("F1", "this list")])]
+
+
+def keys_sheet():
+    """F1: every keyboard shortcut on one card."""
+    if S.show_keys:
+        S.show_keys = False
+        imgui.open_popup("Keyboard shortcuts")
+    vp = imgui.get_main_viewport()
+    imgui.set_next_window_pos(V(vp.pos.x + vp.size.x / 2, vp.pos.y + vp.size.y / 2), 0, V(0.5, 0.5))
+    if not imgui.begin_popup_modal("Keyboard shortcuts", None, imgui.WindowFlags_.always_auto_resize
+                                   | imgui.WindowFlags_.no_title_bar | imgui.WindowFlags_.no_move)[0]:
+        return
+    bold(f"{fa.ICON_FA_KEYBOARD}  Keyboard shortcuts", 16)
+    for group, keys in KEYS:
+        imgui.spacing()
+        imgui.push_font(S.bold, 12.5)
+        imgui.text_colored(DIM, group.upper())
+        imgui.pop_font()
+        for key, what in keys:
+            x = imgui.get_cursor_pos_x()
+            imgui.push_font(S.mono, 15)
+            imgui.text_colored(CYAN, key)
+            imgui.pop_font()
+            imgui.same_line(x + sc(150))
+            imgui.text(what)
+    imgui.spacing()
+    # Esc or the button; not F1 again: the press that opened the sheet would close it straight away
+    if neon_button("Close  [Esc]##keysclose", DIM, V(-1, 0)) or imgui.is_key_pressed(imgui.Key.escape, False):
+        imgui.close_current_popup()
+    imgui.end_popup()
 
 
 def toggle_play(app):
@@ -2613,8 +2709,8 @@ def tiles(app, panel_h):
                 app.ask_export([name])
             if imgui.selectable(f"{fa.ICON_FA_CAMERA}   Update thumbnail (from the output now)", False)[0]:
                 app.save_thumb(name)
-            if imgui.selectable(f"{fa.ICON_FA_TRASH}   Delete", False)[0]:
-                app.delete_preset(name)
+            if imgui.selectable(f"{fa.ICON_FA_TRASH}   Delete...", False)[0]:
+                S.confirm_delete = name
             imgui.end_popup()
         if S.meta_open == name:   # opened here so it shares the tile's ID scope
             S.meta_open = None

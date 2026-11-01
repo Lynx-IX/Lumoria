@@ -2017,6 +2017,8 @@ class App:
                 self.set_source(None, "Test pattern")
             elif (frame := self.source.latest()) is not None:
                 self.pipe.upload(frame)
+        if self.share_dialog or self.file_dialog:
+            raise_dialogs()
         self.finish_share_dialog()
         if self.file_dialog and self.file_dialog[2].ready():
             (target, kind, dialog), self.file_dialog = self.file_dialog, None
@@ -2184,6 +2186,39 @@ def run_selftest(app, frame):
         except OSError:
             pass
     return True
+
+
+_raised = set()
+
+
+def raise_dialogs():
+    """Bring Lumoria's open file dialogs in front once each. They open from a helper thread, so Windows can put
+    them behind Lumoria's own windows, where they're easy to miss while Lumoria waits for an answer."""
+    if os.name != "nt":
+        return
+    user32, me = ctypes.windll.user32, os.getpid()
+    found = []
+
+    @ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+    def visit(hwnd, _):
+        pid = ctypes.c_ulong()
+        user32.GetWindowThreadProcessId(ctypes.c_void_p(hwnd), ctypes.byref(pid))
+        cls = ctypes.create_unicode_buffer(16)
+        user32.GetClassNameW(ctypes.c_void_p(hwnd), cls, 16)
+        if pid.value == me and cls.value == "#32770" and user32.IsWindowVisible(ctypes.c_void_p(hwnd)):
+            found.append(hwnd)   # a standard dialog window of ours
+        return True
+
+    user32.EnumWindows(visit, None)
+    for hwnd in found:
+        if hwnd in _raised:
+            continue
+        _raised.add(hwnd)
+        h = ctypes.c_void_p(hwnd)
+        flags = 0x0001 | 0x0002 | 0x0040   # keep size and position, show
+        user32.SetWindowPos(h, ctypes.c_void_p(-1), 0, 0, 0, 0, flags)   # on top of everything,
+        user32.SetWindowPos(h, ctypes.c_void_p(-2), 0, 0, 0, 0, flags)   # then an ordinary window again
+        user32.SetForegroundWindow(h)
 
 
 def selftest_loopback():

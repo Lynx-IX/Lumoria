@@ -277,7 +277,7 @@ CATEGORIES = ["Sources", "Cutout", "Interactive", "Motion", "Mirror & Geometry",
 _CAT = {
     "zoom": "Motion", "shake": "Motion", "liquid": "Motion",
     "sym_lr": "Mirror & Geometry", "sym_tb": "Mirror & Geometry", "sym_quad": "Mirror & Geometry",
-    "kaleido": "Mirror & Geometry", "fractal": "Mirror & Geometry", "droste": "Mirror & Geometry",
+    "kaleido": "Mirror & Geometry", "mirrorslice": "Mirror & Geometry", "fractal": "Mirror & Geometry", "droste": "Mirror & Geometry",
     "pixel": "Stylize", "glitch": "Stylize", "rgb": "Stylize", "edges": "Stylize", "glow": "Stylize",
     "poster": "Stylize", "vhs": "Stylize",
     "thermal": "Colour", "hue": "Colour", "invert": "Colour", "flash": "Colour",
@@ -609,6 +609,65 @@ void main(){ float asp = u_res.x/u_res.y; vec2 p = v_uv-u_centre; p.x *= asp;
   p = vec2(cos(a),sin(a))*r; p.x /= asp;
   o = tx(p+u_centre); }"""),
 
+    # Mirror Slice: the image tool, live. The picture is mirrored into a grid (none / left-right / up-down / both),
+    # cut into strips, and the strips laid outside-in: 1, last, 2, second-to-last... first across, then down. Done
+    # backwards per pixel (which strip, which mirror copy, which source pixel), so any counts run at full speed.
+    dict(id="mirrorslice", name="Mirror Slice", amt=1., amt_label="Density", speed=True,
+         params=[("Columns", 50., 2., 120., "%.0f"), ("Rows", 50., 2., 120., "%.0f"), ("Gaps", 0.)],
+         options=[("Reflection", ["None", "Left-right", "Up-down", "Both"], 3),
+                  ("Left-right copy", ["On the right", "On the left"], 0),
+                  ("Up-down copy", ["Below", "Above"], 0),
+                  ("Strips", ["Columns and rows", "Columns only", "Rows only"], 0),
+                  ("Slice", ["Whole picture", "The person (over the picture)", "The person (over black)",
+                             "The background (you stay whole)"], 0),
+                  ("Motion", ["Still", "New density on the beat", "Drift"], 0)],
+         mask_when=(4, (1, 2, 3)), code="""
+// where strip position s (0..1) along an axis cut into n strips takes its picture from: the strips are laid
+// 0, n-1, 1, n-2, 2... (outside-in), so position p shows strip p/2 when p is even, n-1-(p-1)/2 when odd
+float unslice(float s, float n){
+  float p = min(floor(s*n), n - 1.), f = s*n - p;
+  float i = mod(p, 2.) < .5 ? p*.5 : n - 1. - (p - 1.)*.5;
+  return (i + f)/n;
+}
+// the mirror grid along one axis: two halves, the original and its flipped copy (copyFirst: the copy comes first)
+float unmirror(float c, bool on, bool copyFirst){
+  if (!on) return c;
+  float l = fract(c*2.);
+  bool flipped = (c < .5) == copyFirst;
+  return flipped ? 1. - l : l;
+}
+void main(){
+  float dens = mix(.1, 1., clamp(u_amt, 0., 1.));
+  if (u_opt5 == 1) {   // a new density on every beat, in a four-beat pattern: full, a third, two-thirds, a fifth
+    float k = mod(floor(u_beats), 4.);
+    dens *= k < .5 ? 1. : (k < 1.5 ? .35 : (k < 2.5 ? .65 : .2));
+  }
+  float cols = max(2., floor(u_p0*dens + .5)), rows = max(2., floor(u_p1*dens + .5));
+  vec2 s = v_uv;
+  if (u_opt5 == 2) s = fract(s + vec2(.05, .031)*u_time*u_speed);   // the cut lines roll slowly
+  bool doCols = u_opt3 != 2, doRows = u_opt3 != 1;
+  // gaps: thin dark lines between strips (anti-aliased over about a pixel)
+  float gap = 1.;
+  if (u_p2 > 0.) {
+    float w = u_p2*.35;
+    if (doCols) { float f = fract(s.x*cols); gap *= smoothstep(w, w + cols/u_res.x, min(f, 1. - f)); }
+    if (doRows) { float f = fract(s.y*rows); gap *= smoothstep(w, w + rows/u_res.y, min(f, 1. - f)); }
+  }
+  if (doCols) s.x = unslice(s.x, cols);
+  if (doRows) s.y = unslice(s.y, rows);
+  s.x = unmirror(s.x, u_opt0 == 1 || u_opt0 == 3, u_opt1 == 1);
+  s.y = unmirror(s.y, u_opt0 == 2 || u_opt0 == 3, u_opt2 == 1);
+  vec3 sliced = tx(s).rgb*gap, here = texture(u_tex, v_uv).rgb;
+  if (u_opt4 == 1 || u_opt4 == 2) {   // only the person is sliced: their mask travels with their pixels
+    vec3 back = vec3(0.);
+    if (u_opt4 == 1)   // the picture, with the unsliced you erased if the empty room has been captured
+      back = u_plate_on > .5 ? mix(here, texture(u_plate, v_uv).rgb, maskAt(v_uv)) : here;
+    o = vec4(mix(back, sliced, maskAt(s)), 1.); return; }
+  if (u_opt4 == 3) {   // only the room is sliced; with a captured background, no bits of you in the pieces
+    if (u_plate_on > .5) sliced = mix(sliced, texture(u_plate, s).rgb*gap, maskAt(s));
+    o = vec4(mix(sliced, here, maskAt(v_uv)), 1.); return; }
+  o = vec4(sliced, 1.);
+}"""),
     dict(id="fractal", name="Fractal Fold", amt=.5, center=True, speed=True,
          params=[("Fold shape", .5), ("Zoom", .5)], code="""
 void main(){ float asp = u_res.x/u_res.y; vec2 p = (v_uv-u_centre)*vec2(asp,1.);

@@ -10,8 +10,8 @@ your music, and sends the result to OBS (Spout, window capture or the OBS Virtua
 file. Build looks, line them up in a playlist and fire them live, on the beat.
 
 ## Features
-- **48 GPU effects**: neon edges, kaleidoscope, glitch, datamosh, tracers, warp, film looks, colour grading,
-  visualizers and more, stacked in any order, each set to manual, audio-reactive or a wave.
+- **49 GPU effects**: neon edges, kaleidoscope, mirror slice, glitch, datamosh, tracers, warp, film looks, colour
+  grading, visualizers and more, stacked in any order, each set to manual, audio-reactive or a wave.
 - **AI person cut-out** (Robust Video Matting on the GPU): put effects on you, on the background or both; erase
   or replace the background; cut people out of several sources onto one scene.
 - **Interactive effects** that react to your movement: smoke, flames, water ripples, light painting, settling
@@ -128,6 +128,14 @@ Source: **Audio** (follows the bass, steady through quiet parts), **Tap** (`T`, 
 virtual port such as loopMIDI; Start = beat 1). `B` makes the current beat beat 1 of the bar. Transition times,
 a look's stay time and the auto-play interval can be in **seconds, beats or bars**. **Launch** (now / beat /
 bar) makes a fired look wait for the next beat or bar, with a countdown on its tile.
+
+## Mirror Slice
+Mirrors the picture (left-right, up-down or both, as a 2x2 grid), cuts it into strips and lays them outside-in
+(1, last, 2, second-to-last...), first across, then down: a live version of the Mirror Slice image tool. *Columns*
+and *Rows* (2-120) set the strips, *Density* scales both (so audio or wave mode makes it breathe), *Gaps* draws
+dark lines between strips. *Slice* can cut up the whole picture, only you (over the picture or over black; with a
+captured background the unsliced you is erased underneath) or only the background while you stay whole.
+*Motion*: still, a new density on every beat, or drifting cut lines (Speed).
 
 ## Interactive effects
 The *Interactive* category reacts to you, through the AI mask (Source: Person) or anything moving in the

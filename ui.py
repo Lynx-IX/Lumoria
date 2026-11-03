@@ -1183,7 +1183,7 @@ def about_section():
     imgui.text(f"Lumoria Visual FX Engine {VERSION}")
     imgui.pop_font()
     imgui.text_colored(DIM, "Live GPU visuals: effects, AI cut-outs, audio, MIDI, looks.")
-    imgui.text_colored(DIM, "Free software under the GNU GPL v3.0: share it, change it, build on it.")
+    imgui.text_colored(DIM, "Open source under the GNU GPL v3.0: share it, change it, build on it.")
     if neon_button(f"{fa.ICON_FA_HAND_SPARKLES}  Show the welcome again##welcome", DIM, V(-1, 0)):
         S.welcomed = False
     if SUPPORT_URL and neon_button(f"{fa.ICON_FA_HEART}  Support Lumoria##support", MAGENTA, V(-1, 0),

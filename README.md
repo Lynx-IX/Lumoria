@@ -216,7 +216,7 @@ looks, settings and MIDI links in `%APPDATA%\Lumoria` (kept on uninstall). Check
 on, writes `%TEMP%\LumoriaSelftest\selftest.json`, and quits, without touching your own looks.
 
 ## License
-Lumoria is free software under the [GNU General Public License v3.0](LICENSE): you can use it, share it, change
+Lumoria is open source under the [GNU General Public License v3.0](LICENSE): you can use it, share it, change
 it and sell it, as long as what you pass on stays under the same licence with its source available. The AI mask
 model (Robust Video Matting, see `models/README.md`) is GPL-3.0; the x264 encoder bundled through PyAV is GPL;
 everything else Lumoria builds on is under permissive licences (listed in Settings > About).

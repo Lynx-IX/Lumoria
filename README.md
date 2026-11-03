@@ -10,12 +10,14 @@ your music, and sends the result to OBS (Spout, window capture or the OBS Virtua
 file. Build looks, line them up in a playlist and fire them live, on the beat.
 
 ## Features
-- **49 GPU effects**: neon edges, kaleidoscope, mirror slice, glitch, datamosh, tracers, warp, film looks, colour
-  grading, visualizers and more, stacked in any order, each set to manual, audio-reactive or a wave.
+- **58 GPU effects**: neon edges, kaleidoscope, mirror slice, pixel sort, stained glass, oil paint, tiny planet,
+  glitch, datamosh, tracers, time grid, film looks, colour grading, visualizers and more, stacked in any order,
+  each set to manual, audio-reactive or a wave.
 - **AI person cut-out** (Robust Video Matting on the GPU): put effects on you, on the background or both; erase
   or replace the background; cut people out of several sources onto one scene.
 - **Interactive effects** that react to your movement: smoke, flames, water ripples, light painting, settling
   snow, pin art, touch-to-pop bubbles.
+- **Person effects**: echo clones of you trailing in time, hologram, aura, and disintegrating into dust or embers.
 - **Music-driven**: follows any input or *what you hear* on the PC; a beat clock from the audio, tap tempo,
   manual BPM or MIDI clock from your DAW; timing in seconds, beats or bars.
 - **Looks and playlist**: save whole setups as looks, crossfade or morph between them, auto-play by time or
@@ -136,6 +138,29 @@ and *Rows* (2-120) set the strips, *Density* scales both (so audio or wave mode 
 dark lines between strips. *Slice* can cut up the whole picture, only you (over the picture or over black; with a
 captured background the unsliced you is erased underneath) or only the background while you stay whole.
 *Motion*: still, a new density on every beat, or drifting cut lines (Speed).
+
+## Person effects (Cutout)
+Built on the AI mask:
+- **Echo Clones:** copies of you a little further back in time each, beside you (both sides, right, left) or
+  behind you shrinking into the distance. *Spacing* (the main slider; audio or wave mode makes the line breathe),
+  *Copies* (1-7), *Delay*, *Fade*, *Tint* with any palette.
+- **Hologram:** you as a tinted, scanlined projection with flicker, glitch tears, a glowing edge and a projector
+  beam (drag the centre point to move its base). *Behind you*: the room (the captured background if there is one),
+  a dark room or black.
+- **Aura:** a glow streaming off your outline (*Rising*, *Radiating wisps* or a *Soft halo*) that pulses with the
+  bass, in any palette and colour motion.
+- **Disintegrate:** you crumble into dust, embers or pixels that drift up, sideways, down or outward and come
+  back. *Drive*: a loop, the Progress slider (handy on a MIDI fader) or out and back over two bars.
+
+## More looks
+- **Pixel Sort:** runs of bright or dark pixels, you, the background or everything sorted into streaks by
+  brightness, hue or saturation, in any direction.
+- **Stained Glass:** the picture as glass cells with lead between them (dark, gold, white or glowing); still, a new
+  pattern on every beat, or drifting cells.
+- **Oil Paint:** brush-stroke painting (Kuwahara filter) with canvas texture and outlines, or *Watercolour*.
+- **Tiny Planet:** the picture wrapped into a little world with you standing on top, or a tunnel; Twist and spin.
+- **Time Grid:** tiles each showing a moment further back (2x2 to 4x4), whole pictures or each tile its own part
+  of the frame, in reading order, from the centre out or shuffled on the beat.
 
 ## Interactive effects
 The *Interactive* category reacts to you, through the AI mask (Source: Person) or anything moving in the

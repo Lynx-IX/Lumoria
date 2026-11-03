@@ -644,7 +644,7 @@ void main(){
   }
   float cols = max(2., floor(u_p0*dens + .5)), rows = max(2., floor(u_p1*dens + .5));
   vec2 s = v_uv;
-  if (u_opt5 == 2) s = fract(s + vec2(.05, .031)*u_time*u_speed);   // the cut lines roll slowly
+  if (u_opt5 == 2) s = fract(s + vec2(.05, .031)*u_time);   // the cut lines roll slowly (u_time runs at Speed)
   bool doCols = u_opt3 != 2, doRows = u_opt3 != 1;
   // gaps: thin dark lines between strips (anti-aliased over about a pixel)
   float gap = 1.;
@@ -2286,6 +2286,411 @@ _CAT.update({fx["id"]: "Interactive" for fx in INTERACTIVE_EFFECTS}, particles="
 # only does so at full Amount). The UI warns on the cards it hides.
 REDRAWS = {"edges": (1, (1, 2), True), "linedraw": (3, (0,), True), "ascii": (3, (0,), False),
            "halftone": (1, (0, 1), False)}
+
+
+# ---- More effects (2026-11): glitch art, painterly, lens, and person effects built on the AI mask
+MORE_EFFECTS = [
+    # Pixel Sort: along each line, runs of qualifying pixels (bright, dark, you, the background or everything)
+    # are sorted by brightness / hue / saturation into streaks. Each run is sampled 12 times and those samples
+    # are sorted, so any run length works live. Long stretches are cut into blocks staggered per line.
+    dict(id="pixelsort", name="Pixel Sort", amt=1., amt_label="Mix",
+         params=[("Threshold", .45), ("Streak length", .45), ("Reverse", 0., 0., 1., "%.0f")],
+         options=[("Direction", ["Down", "Up", "Right", "Left"], 0),
+                  ("Sort by", ["Brightness", "Hue", "Saturation"], 0),
+                  ("Sort where", ["Bright areas", "Dark areas", "The person", "The background", "Everywhere"], 0)],
+         mask_when=(2, (2, 3)), code="""
+float sortKey(vec3 c){
+  float mx = max(max(c.r, c.g), c.b), mn = min(min(c.r, c.g), c.b), d = mx - mn + 1e-5;
+  if (u_opt1 == 1) return (mx == c.r ? mod((c.g - c.b)/d, 6.) : mx == c.g ? (c.b - c.r)/d + 2. : (c.r - c.g)/d + 4.)/6.;
+  if (u_opt1 == 2) return mx > 0. ? (mx - mn)/mx : 0.;
+  return lum(c);
+}
+bool inSpan(vec2 uv){
+  if (uv.x < 0. || uv.x > 1. || uv.y < 0. || uv.y > 1.) return false;
+  if (u_opt2 == 4) return true;
+  if (u_opt2 == 2) return maskAt(uv) > .5;
+  if (u_opt2 == 3) return maskAt(uv) < .5;
+  float l = lum(tx(uv).rgb);
+  return u_opt2 == 0 ? l > u_p0 : l < u_p0;
+}
+void main(){
+  vec3 here = tx(v_uv).rgb;
+  if (!inSpan(v_uv)) { o = vec4(here, 1.); return; }
+  bool vert = u_opt0 < 2;
+  vec2 dir = u_opt0 == 0 ? vec2(0., 1.) : u_opt0 == 1 ? vec2(0., -1.) : u_opt0 == 2 ? vec2(1., 0.) : vec2(-1., 0.);
+  float along = vert ? v_uv.y*u_res.y : v_uv.x*u_res.x, line = vert ? floor(v_uv.x*u_res.x) : floor(v_uv.y*u_res.y);
+  if (dir.x + dir.y < 0.) along = (vert ? u_res.y : u_res.x) - along;
+  float block = mix(24., 520., u_p1);                      // the longest streak, in pixels
+  float a = along + hash(vec2(line, 3.1))*block;           // blocks staggered line by line
+  float st = max(1., block/16.);                           // marching step, in pixels
+  vec2 px = dir/u_res*st;
+  float maxBack = floor((a - floor(a/block)*block)/st), maxFwd = floor((block - (a - floor(a/block)*block))/st);
+  float back = 0., fwd = 0.;
+  for (int i = 1; i <= 16; i++){ if (float(i) > maxBack || !inSpan(v_uv - px*float(i))) break; back = float(i); }
+  for (int i = 1; i <= 16; i++){ if (float(i) > maxFwd || !inSpan(v_uv + px*float(i))) break; fwd = float(i); }
+  float len = back + fwd;
+  if (len < 1.) { o = vec4(here, 1.); return; }
+  vec2 start = v_uv - px*back;
+  vec3 col[12]; float key[12];
+  for (int i = 0; i < 12; i++){
+    vec3 c = tx(start + px*len*(float(i) + .5)/12.).rgb;
+    col[i] = c; key[i] = (u_p2 > .5 ? -sortKey(c) : sortKey(c)) + float(i)*1e-5;   // ties broken by position
+  }
+  // this pixel's place in the run picks a rank; find the samples ranked there and next (no array shuffling,
+  // which graphics cards are slow at)
+  float f = clamp(back/len, 0., 1.)*11.;
+  float r0 = floor(f), r1 = min(r0 + 1., 11.);
+  vec3 c0 = col[0], c1 = col[0];
+  for (int i = 0; i < 12; i++){
+    float rank = 0.;
+    for (int j = 0; j < 12; j++) rank += step(key[j], key[i]) - (j == i ? 1. : 0.);
+    if (rank == r0) c0 = col[i];
+    if (rank == r1) c1 = col[i];
+  }
+  vec3 sorted = mix(c0, c1, f - r0);
+  o = vec4(mix(here, sorted, clamp(u_amt, 0., 1.)), 1.);
+}"""),
+
+    # Stained Glass: the picture as glass cells (each the colour at its centre) with dark leading between them
+    # and a little light falling across each pane. Cells can re-shatter on the beat or drift.
+    dict(id="stainedglass", name="Stained Glass", amt=.45, amt_label="Cells", speed=True,
+         params=[("Leading", .35), ("Glass light", .5), ("Colour boost", .4)],
+         options=[("Shatter", ["Still", "New pattern on the beat", "Drifting cells"], 0),
+                  ("Leading colour", ["Dark lead", "Gold", "White", "Glowing (palette)"], 0),
+                  ("Colours", PALETTES, 0)], code="""
+vec2 cellPoint(vec2 c, float seed){
+  vec2 h = vec2(hash(c + seed), hash(c + seed + 17.3));
+  if (u_opt0 == 2) h = .5 + .45*sin(u_time*.5 + h*6.2831853);
+  return c + .1 + .8*h;
+}
+void main(){
+  float asp = u_res.x/u_res.y;
+  float n = mix(70., 5., clamp(u_amt, 0., 1.));          // cells down the picture
+  float seed = u_opt0 == 1 ? floor(u_beats)*3.17 : 0.;
+  vec2 p = v_uv*vec2(asp, 1.)*n, g = floor(p);
+  vec2 best = vec2(0.), bestCell = vec2(0.); float d1 = 1e9;
+  for (int y = -1; y <= 1; y++) for (int x = -1; x <= 1; x++){
+    vec2 c = g + vec2(x, y), q = cellPoint(c, seed); float d = dot(q - p, q - p);
+    if (d < d1) { d1 = d; best = q; bestCell = c; }
+  }
+  float edge = 1e9;   // distance to the nearest border (to the next cell's half-way line)
+  for (int y = -2; y <= 2; y++) for (int x = -2; x <= 2; x++){
+    vec2 c = g + vec2(x, y); if (c == bestCell) continue;
+    vec2 q = cellPoint(c, seed);
+    edge = min(edge, dot((best + q)*.5 - p, normalize(q - best)));
+  }
+  vec2 centre = best/n/vec2(asp, 1.);
+  vec3 glass = (tx(centre).rgb*2. + tx(mix(centre, v_uv, .5)).rgb)/3.;
+  float l = lum(glass);
+  glass = clamp(mix(vec3(l), glass, 1. + u_p2*1.5)*(1. + u_p2*.25), 0., 1.);
+  vec2 lightDir = normalize(vec2(-.6, -.8));
+  glass *= 1. + u_p1*(.35*dot(normalize(p - best + 1e-4), lightDir)*smoothstep(0., .5, sqrt(d1)) + .1);
+  float w = mix(.015, .2, u_p0), aa = 1.5*n/u_res.y;
+  float lead = 1. - smoothstep(w, w + aa, edge);
+  vec3 leadCol = u_opt1 == 0 ? vec3(.05, .045, .04) : u_opt1 == 1 ? vec3(.85, .65, .25) : u_opt1 == 2 ? vec3(.95)
+               : palCycle(u_opt2, hash(bestCell) + u_time*.1, glass)*1.4;
+  leadCol *= .8 + .4*smoothstep(w, 0., edge);   // a rounded highlight along the lead
+  o = vec4(mix(glass, leadCol, lead), 1.);
+}"""),
+
+    # Oil Paint: a Kuwahara filter. Around each pixel, of four overlapping squares the calmest one's average
+    # colour wins, so flat areas become brush-strokes and edges stay sharp. Watercolour blends them softly,
+    # adds paper texture and pigment pooling at the edges.
+    dict(id="oilpaint", name="Oil Paint", amt=.5, amt_label="Brush size",
+         params=[("Canvas texture", .35), ("Outline", .2), ("Colour boost", .25)],
+         options=[("Style", ["Oil", "Watercolour"], 0)], code="""
+void main(){
+  float r = mix(2., 10., clamp(u_amt, 0., 1.));            // brush radius in pixels
+  float st = max(1., r/4.);                                 // keep it to 5 x 5 samples per square
+  vec2 px = st/u_res;
+  vec3 m[4]; vec3 s[4];
+  for (int k = 0; k < 4; k++){ m[k] = vec3(0.); s[k] = vec3(0.); }
+  for (int y = 0; y <= 4; y++) for (int x = 0; x <= 4; x++){
+    vec2 o2 = vec2(x, y);
+    vec3 c0 = tx(v_uv + vec2(-o2.x, -o2.y)*px).rgb, c1 = tx(v_uv + vec2(o2.x, -o2.y)*px).rgb;
+    vec3 c2 = tx(v_uv + vec2(-o2.x, o2.y)*px).rgb, c3 = tx(v_uv + vec2(o2.x, o2.y)*px).rgb;
+    m[0] += c0; s[0] += c0*c0; m[1] += c1; s[1] += c1*c1;
+    m[2] += c2; s[2] += c2*c2; m[3] += c3; s[3] += c3*c3;
+  }
+  vec3 outc = vec3(0.); float best = 1e9, wsum = 0.;
+  for (int k = 0; k < 4; k++){
+    m[k] /= 25.; vec3 v = abs(s[k]/25. - m[k]*m[k]); float var = v.r + v.g + v.b;
+    if (u_opt0 == 0) { if (var < best) { best = var; outc = m[k]; } }
+    else { float w = 1./(1. + var*400.); outc += m[k]*w; wsum += w; }
+  }
+  if (u_opt0 == 1) outc /= wsum;
+  float l = lum(outc);
+  outc = clamp(mix(vec3(l), outc, 1. + u_p2), 0., 1.);
+  vec2 q = v_uv*u_res;
+  if (u_opt0 == 0) {   // canvas weave
+    float weave = sin(q.x*1.7)*sin(q.y*1.7)*.5 + (hash(floor(q*.5)) - .5);
+    outc *= 1. + u_p0*.12*weave;
+  } else {             // paper grain, lighter washes
+    outc = mix(outc, vec3(1.), .12);
+    outc *= 1. - u_p0*.18*hash(floor(q/2.))*hash(floor(q/7.) + 3.);
+  }
+  // outline: where the painted colour changes fast, like ink or pooled pigment
+  vec2 e = r*.6/u_res;
+  float g = length(tx(v_uv + vec2(e.x, 0.)).rgb - tx(v_uv - vec2(e.x, 0.)).rgb)
+          + length(tx(v_uv + vec2(0., e.y)).rgb - tx(v_uv - vec2(0., e.y)).rgb);
+  outc *= 1. - u_p1*smoothstep(.15, .6, g)*(u_opt0 == 0 ? .7 : .45);
+  o = vec4(outc, 1.);
+}"""),
+
+    # Tiny Planet: the picture wrapped round into a little world (the bottom of the picture becomes the ground
+    # at the centre, the sky all around) or the other way, a tunnel with the sky in the middle.
+    dict(id="tinyplanet", name="Tiny Planet", amt=.5, amt_label="Size", center=True, speed=True,
+         params=[("Twist", 0., -1., 1.)],
+         options=[("Shape", ["Planet", "Tunnel"], 0),
+                  ("Seam", ["One full turn (seam underneath)", "Mirrored (seamless, twice round)"], 0)], code="""
+void main(){
+  float asp = u_res.x/u_res.y;
+  vec2 p = (v_uv - u_centre)*vec2(asp, 1.);
+  float R = mix(.06, .5, clamp(u_amt, 0., 1.));          // the horizon's radius, in picture heights
+  float r = length(p);
+  // the middle of the picture points up, so you stand on top of the planet; the seam is underneath
+  float a = atan(p.x, -p.y)/6.2831853 + .5 + u_time*.02 + u_p0*r/R*.15;
+  float x = u_opt1 == 1 ? 1. - abs(fract(a)*2. - 1.) : fract(a);
+  float h = .5*r/R;                                       // ground at the centre, horizon at R, sky beyond
+  // the planet's sky stops at the top of the picture; the tunnel mirrors on inwards forever
+  float y = u_opt0 == 0 ? clamp(1. - h, .002, .998) : h;
+  o = vec4(tx(vec2(x, y)).rgb, 1.);
+}"""),
+]
+
+# What's behind the person, for effects that make them see-through or take them away: the captured empty room
+# if there is one, otherwise a guess from the picture around them (an average of nearby background).
+BEHIND_GLSL = """
+vec3 behindYou(vec2 uv){
+  if (u_plate_on > .5) return texture(u_plate, uv).rgb;
+  vec3 s = vec3(0.); float w = 0.;
+  for (int i = 0; i < 12; i++){
+    float a = float(i)*.5236, r = .06 + .05*float(i % 3);
+    vec2 q = uv + vec2(cos(a)*u_res.y/u_res.x, sin(a))*r;
+    float k = 1. - maskAt(q); s += tx(q).rgb*k; w += k;
+  }
+  return w > .5 ? s/w : tx(uv).rgb*.25;
+}
+"""
+VNOISE_GLSL = """
+float vnz(vec2 p){ vec2 i = floor(p), f = fract(p); f = f*f*(3. - 2.*f);
+  return mix(mix(hash(i), hash(i + vec2(1., 0.)), f.x), mix(hash(i + vec2(0., 1.)), hash(i + vec2(1., 1.)), f.x), f.y); }
+"""
+
+MORE_EFFECTS += [
+    # Hologram: you as a flickering projection: tinted, scanlined, with glitch tears, a glowing edge and a beam of
+    # light rising from the projector (drag the centre point to move it).
+    dict(id="hologram", name="Hologram", amt=1., amt_label="Strength", mask=True, center=True,
+         params=[("Flicker", .4), ("Scanlines", .6), ("Glitch", .3), ("See-through", .35), ("Beam", .5)],
+         options=[("Colours", PALETTES, 1), ("Colour motion", COLOUR_MOTION, 0),
+                  ("Behind you", ["The room", "Dark room", "Black"], 0)], code=BEHIND_GLSL + """
+void main(){
+  float asp = u_res.x/u_res.y;
+  // glitch tears: a few bands of rows jump sideways for a moment
+  float band = floor(v_uv.y*90.), tick = floor(u_time*9.);
+  float tear = step(1. - u_p2*.12, hash(vec2(band, tick)))*(hash(vec2(band, tick + 5.)) - .5)*.08;
+  vec2 uv = v_uv + vec2(tear, 0.);
+  vec3 here = tx(v_uv).rgb, src = tx(uv).rgb;
+  float m = maskAt(uv), mHere = maskAt(v_uv);
+  vec3 room = mix(here, behindYou(v_uv), mHere);
+  if (u_opt2 == 1) room *= .3;
+  if (u_opt2 == 2) room = vec3(0.);
+  vec3 tint = palCycle(u_opt0, palPhase(u_opt1, v_uv), src);
+  vec3 holo = tint*(.2 + 1.15*lum(src));
+  float scan = 1. - u_p1*.55*(.5 + .5*sin(v_uv.y*u_res.y*1.1 - u_time*30.));
+  float roll = u_p1*.35*exp(-pow((fract(v_uv.y*.8 - u_time*.18) - .5)*14., 2.));   // a bright band sweeping
+  float flick = 1. - u_p0*(.3*step(.8, hash(vec2(floor(u_time*24.), 1.))) + .12*(.5 + .5*sin(u_time*9.)));
+  holo = holo*scan*flick + tint*roll*m;
+  vec2 e = 2.5/u_res;
+  float edge = clamp((abs(maskAt(uv + vec2(e.x, 0.)) - maskAt(uv - vec2(e.x, 0.)))
+                    + abs(maskAt(uv + vec2(0., e.y)) - maskAt(uv - vec2(0., e.y))))*1.6, 0., 1.);
+  vec3 c = mix(room, holo, m*mix(.95, .35, u_p3)*flick) + tint*edge*flick;
+  // the projector's beam, from the bottom of the picture under the centre point, widening upward
+  float up = 1. - v_uv.y, half_ = .02 + up*.3;
+  float beam = (1. - smoothstep(half_*.15, half_, abs(v_uv.x - u_centre.x)*asp))*pow(1. - up, 1.5);
+  c += tint*beam*u_p4*.45*(.7 + .3*flick);
+  o = vec4(mix(here, c, clamp(u_amt, 0., 1.)), 1.);
+}"""),
+
+    # Aura: a glow streaming off your outline, rising like heat, radiating in wisps, or a soft halo; it pulses
+    # with the bass (Bass pulse) and takes any palette and colour motion.
+    dict(id="aura", name="Aura", amt=.45, amt_label="Size", mask=True, speed=True,
+         params=[("Glow", .7), ("Bass pulse", .5), ("Wisps", .6)],
+         options=[("Colours", PALETTES, 5), ("Colour motion", COLOUR_MOTION, 2),
+                  ("Shape", ["Rising", "Radiating wisps", "Soft halo"], 0)], code=VNOISE_GLSL + """
+void main(){
+  vec3 here = tx(v_uv).rgb;
+  float asp = u_res.x/u_res.y;
+  float size = mix(.03, .3, clamp(u_amt, 0., 1.))*(1. + u_bands.x*u_p1);
+  float t = u_time, acc = 0., wsum = 0.;
+  for (int i = 1; i <= 14; i++){
+    float k = float(i)/14.;
+    vec2 off;
+    if (u_opt2 == 0) {   // rising: the glow here came from below, wavering sideways like heat
+      float w = (vnz(v_uv*vec2(7., 3.) + vec2(0., t*1.5) + k*2.) - .5)*u_p2;
+      off = vec2(w*.6/asp, k)*size;
+    } else {             // all round; wisps turn slowly
+      float a = float(i)*2.39996 + (u_opt2 == 1 ? (vnz(v_uv*4. + t*.5) - .5)*u_p2*6. : 0.);
+      off = vec2(cos(a)/asp, sin(a))*k*size;
+    }
+    float w = 1. - k*.85;
+    acc += maskAt(v_uv + off)*w; wsum += w;
+  }
+  float aura = pow(clamp(acc/wsum*1.6, 0., 1.), .8)*(1. - maskAt(v_uv));   // outside you only
+  vec3 col = palCycle(u_opt0, palPhase(u_opt1, v_uv) + aura*.3, here);
+  o = vec4(here + col*aura*u_p0*1.6, 1.);
+}"""),
+
+    # Disintegrate: you crumble into dust / embers / pixels that drift away on the wind, and come back.
+    # Each little cell of you leaves at its own moment (the side the wind blows toward first); for every pixel
+    # the cells upwind are checked to see if one of their particles has landed here.
+    dict(id="disintegrate", name="Disintegrate", amt=.5, amt_label="Progress", mask=True, center=True, speed=True,
+         params=[("Particle size", .3), ("Travel", .5), ("Swirl", .4)],
+         options=[("Drive", ["Loop", "Amount slider (or MIDI)", "Out and back on the beat (2 bars)"], 0),
+                  ("Drift", ["Up (ash)", "Right (wind)", "Left (wind)", "Down (sand)", "Outward"], 0),
+                  ("Style", ["Dust", "Embers", "Pixels"], 0)], code=BEHIND_GLSL + """
+float progress(){
+  if (u_opt0 == 0) return smoothstep(0., 1., 1. - abs(fract(u_time*.15)*2. - 1.));   // ~7 s out and back
+  if (u_opt0 == 2) return smoothstep(0., 1., 1. - abs(fract(beatGlide()/8.)*2. - 1.));
+  return clamp(u_amt, 0., 1.);
+}
+vec2 windAt(vec2 P){   // the direction particles leave in, in pixels
+  if (u_opt1 == 0) return vec2(0., -1.);
+  if (u_opt1 == 1) return normalize(vec2(1., -.2));
+  if (u_opt1 == 2) return normalize(vec2(-1., -.2));
+  if (u_opt1 == 3) return vec2(0., 1.);
+  vec2 d = P - u_centre*u_res; return length(d) > 1. ? d/length(d) : vec2(0., -1.);
+}
+float leaveAt(vec2 cell, vec2 cc){   // when (0..0.75 of the way) this cell lets go: downwind side first
+  vec2 w = windAt(cc);
+  float side = dot(cc/u_res - .5, w*vec2(u_res.x/u_res.y, 1.)) + .5;
+  return .75*mix(hash(cell), 1. - clamp(side, 0., 1.), .55);
+}
+void main(){
+  float p = progress();
+  float cs = mix(2., 12., u_p0)*(u_opt2 == 2 ? 2. : 1.);   // particle cell, pixels
+  float D = mix(.08, .8, u_p1)*u_res.y;                   // how far they fly, pixels
+  vec2 P = v_uv*u_res;
+  vec3 here = tx(v_uv).rgb;
+  float m = maskAt(v_uv);
+  vec2 cellH = floor(P/cs);
+  float thH = leaveAt(cellH, (cellH + .5)*cs);
+  float intact = step(p, thH);
+  vec3 c = mix(here, behindYou(v_uv), m*(1. - intact));
+  if (u_opt2 == 1) c += vec3(1., .45, .1)*m*intact*smoothstep(.06, 0., thH - p)*step(.001, p)*1.5;   // burning edge
+  // particles in flight: look back upwind for cells whose particle lands on this pixel
+  vec2 w = windAt(P), perp = vec2(-w.y, w.x);
+  float stepPx = max(cs, D*1.4/32.);
+  for (int k = 0; k < 32; k++){
+    vec2 S = P - w*stepPx*float(k);
+    for (int l = -1; l <= 1; l++){
+      vec2 C = floor(S/cs) + floor(perp*float(l) + .5);
+      vec2 cc = (C + .5)*cs;
+      if (maskAt(cc/u_res) < .5) continue;
+      float th = leaveAt(C, cc);
+      if (p <= th) continue;
+      float life = (p - th)/(1. - th + 1e-3);
+      float d = (p - th)*D*(.6 + .8*hash(C + 9.1));
+      vec2 L = cc + windAt(cc)*d + perp*sin(d/D*10. + hash(C)*6.28)*D*.08*u_p2;
+      float r = cs*.55*(1. - smoothstep(.5, 1., life));
+      vec2 q = abs(P - L);
+      if ((u_opt2 == 2 ? max(q.x, q.y) : length(P - L)) < r) {
+        vec3 pc = tx(cc/u_res).rgb;
+        if (u_opt2 == 1) pc = mix(vec3(1., .85, .4), vec3(1., .3, .05), life)*1.6;
+        c = mix(c, pc, 1. - life*.5);
+        o = vec4(mix(here, c, step(.001, p)), 1.); return;
+      }
+    }
+  }
+  o = vec4(c, 1.);
+}"""),
+]
+
+# Frame memory for Echo Clones and Time Grid: 16 half-size frames in a 4 x 4 atlas (the state buffer is twice the
+# picture's size), one refreshed per interval, round and round. Alpha keeps the person mask (0.5 + mask/2), and
+# 0 marks a tile that hasn't been filled yet.
+def _atlas_writer(every):
+    return """
+void main(){
+  float every = """ + every + """;
+  float wi = mod(floor(u_time/every), 16.);
+  vec2 tile = floor(v_uv*4.);
+  if (tile.x + 4.*tile.y == wi) { vec2 uv = fract(v_uv*4.); o = vec4(tx(uv).rgb, .5 + .5*maskAt(uv)); return; }
+  o = texture(u_s0, v_uv); }"""
+
+
+ATLAS_READ = """
+// a remembered frame, `back` intervals ago (0 = the one being written now), and the person mask then
+vec4 pastFrame(float back, vec2 uv, float every){
+  float idx = mod(mod(floor(u_time/every), 16.) - back, 16.);
+  vec2 tile = vec2(mod(idx, 4.), floor(idx/4.));
+  vec4 c = texture(u_s0, (tile + clamp(uv, 2./u_res, 1. - 2./u_res))/4.);
+  return c.a < .25 ? vec4(tx(uv).rgb, maskAt(uv)) : vec4(c.rgb, (c.a - .5)*2.);
+}
+"""
+
+MORE_EFFECTS += [
+    # Echo Clones: copies of you, each a little further back in time, standing beside you (or behind, smaller),
+    # so every move ripples down the line. Amount = spacing, so audio / wave mode makes the line breathe.
+    dict(id="echoclones", name="Echo Clones", amt=.35, amt_label="Spacing", mask=True,
+         state=[_atlas_writer("mix(.04, .5, u_p1)*.5")], state_size=[(2, "f1")],
+         params=[("Copies", 4., 1., 7., "%.0f"), ("Delay", .35), ("Fade", .4), ("Tint", 0.)],
+         options=[("Layout", ["Both sides", "To the right", "To the left", "Behind you (into the distance)"], 0),
+                  ("Colours", PALETTES, 0), ("Colour motion", COLOUR_MOTION, 0)], code=ATLAS_READ + """
+void main(){
+  float every = mix(.04, .5, u_p1)*.5;   // two memory slots per copy
+  vec3 here = tx(v_uv).rgb, c = here;
+  int n = int(u_p0 + .5);
+  float gap = mix(.05, .45, clamp(u_amt, 0., 1.));
+  for (int j = 7; j >= 1; j--){          // the furthest copy first, so nearer ones cover it
+    if (j > n) continue;
+    float fj = float(j);
+    vec2 uv;
+    if (u_opt0 == 3) {   // behind: each one smaller and a little higher, toward a vanishing point
+      float s = pow(.82, fj);
+      uv = (v_uv - vec2(.5, .95))/s + vec2(.5, .95) + vec2(0., gap*.9*fj);   // each one smaller and higher
+    } else {
+      float side = u_opt0 == 1 ? 1. : u_opt0 == 2 ? -1. : (mod(fj, 2.) > .5 ? 1. : -1.);
+      float dist = u_opt0 == 0 ? ceil(fj*.5) : fj;
+      uv = v_uv - vec2(side*dist*gap, 0.);
+    }
+    if (uv.x < 0. || uv.x > 1. || uv.y < 0. || uv.y > 1.) continue;
+    vec4 pf = pastFrame(fj*2., uv, every);
+    vec3 col = mix(pf.rgb, palCycle(u_opt1, palPhase(u_opt2, v_uv) + fj/float(n + 1), pf.rgb)*(.35 + lum(pf.rgb)), u_p3);
+    c = mix(c, col, pf.a*pow(1. - u_p2*.6, fj));
+  }
+  o = vec4(mix(c, here, maskAt(v_uv)), 1.);   // the live you stays in front
+}"""),
+
+    # Time Grid: tiles, each showing a different moment, a little further back. Tiles can show the whole picture
+    # or just their own part of it (a mosaic of moments). Amount = time between tiles.
+    dict(id="timegrid", name="Time Grid", amt=.3, amt_label="Delay",
+         state=[_atlas_writer("mix(.03, .6, clamp(u_amt, 0., 1.))")], state_size=[(2, "f1")],
+         params=[("Gaps", .25)],
+         options=[("Grid", ["2 x 2", "3 x 3", "4 x 4"], 1),
+                  ("Each tile shows", ["The whole picture", "Its own part"], 0),
+                  ("Order", ["Reading order", "From the centre out", "Shuffled on the beat"], 0)],
+         code=ATLAS_READ + """
+void main(){
+  float every = mix(.03, .6, clamp(u_amt, 0., 1.));
+  float n = float(u_opt0 + 2);
+  vec2 cell = floor(v_uv*n), f = fract(v_uv*n);
+  float k = cell.x + n*cell.y;
+  if (u_opt2 == 1) k = floor(length(cell + .5 - n*.5)*1.5);   // rings out from the middle
+  if (u_opt2 == 2) k = floor(hash(cell + floor(u_beats)*1.7)*n*n);
+  k = min(k, 15.);
+  vec2 uv = u_opt1 == 0 ? f : v_uv;
+  vec3 c = pastFrame(k, uv, every).rgb;
+  float g = u_p0*.06*n, aa = n*1.5/u_res.y;
+  float edge = min(min(f.x, 1. - f.x)*u_res.x/u_res.y, min(f.y, 1. - f.y));
+  c *= smoothstep(g*.5, g*.5 + aa, edge);
+  o = vec4(c, 1.);
+}"""),
+]
+
+EFFECTS += MORE_EFFECTS
+_CAT.update(pixelsort="Stylize", stainedglass="Stylize", oilpaint="Stylize", tinyplanet="Mirror & Geometry",
+            hologram="Cutout", aura="Cutout", disintegrate="Cutout", echoclones="Cutout", timegrid="Feedback")
 
 for _fx in EFFECTS:
     _fx["cat"] = _CAT.get(_fx["id"], "Other")

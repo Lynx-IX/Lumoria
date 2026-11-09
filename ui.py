@@ -2368,6 +2368,23 @@ def effect_body(app, f):
         imgui.same_line(0, 4)
         if icon_button(fa.ICON_FA_ROTATE_LEFT, "rc", DIM, "Reset to the middle"):
             f.centre = [0.5, 0.5]
+    if f.xform:
+        label("Scale")
+        imgui.set_next_item_width(imgui.get_content_region_avail().x - 32)
+        _, f.xs = slider_float("##xs", f.xs, 0.1, 8.0, "%.2fx", imgui.SliderFlags_.logarithmic)
+        automation_menu(app, f, "xs", 0.1, 8.0, "Scale")
+        imgui.same_line(0, 4)
+        if icon_button(fa.ICON_FA_ROTATE_LEFT, "rxs", DIM, "Back to normal size"):
+            f.xs = 1.0
+        label("Rotate")
+        imgui.set_next_item_width(imgui.get_content_region_avail().x - 32)
+        _, f.xr = slider_float("##xr", f.xr, -360.0, 360.0, "%.0f deg")
+        automation_menu(app, f, "xr", -360.0, 360.0, "Rotate")
+        imgui.same_line(0, 4)
+        if icon_button(fa.ICON_FA_ROTATE_LEFT, "rxr", DIM, "Back to upright"):
+            f.xr = 0.0
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("Scale and Rotate turn the effect about its Centre; the picture underneath stays put")
     music_controls(app, f)
     if f.has_speed:
         label("Speed")

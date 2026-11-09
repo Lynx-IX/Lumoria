@@ -110,7 +110,7 @@ class Effect:
         # rng = its frequency range (Hz) for "range"; resp = None (the main smoothing) or [attack, release] in s
         self.listen, self.rng, self.resp = None, [80.0, 250.0], None
         self.follow, self.follow_t = 0.0, None   # its own smoothed level, when resp is set
-        self.char, self.mresp = 0, 0.5   # Music character (0 Reactive, 1 Swell, 2 Flow, 3 Rhythmic), response time 0..1
+        self.char, self.mresp = spec.get("char", 0), 0.5   # Music character (0 Reactive, 1 Swell, 2 Flow, 3 Rhythmic), response time 0..1
         self.live = 0.0
         self.mix = 0.0               # 0..1 fade position, eases toward on/off
         self.opacity = 1.0           # how much of the effect shows over its input
@@ -128,10 +128,13 @@ class Effect:
         self.amt_label = spec.get("amt_label", "")
         # animated effects run on their own clock so Speed can slow, freeze or reverse them
         self.has_speed = spec.get("speed", False)
+        self.xform = spec.get("xform", False)   # shared Scale / Rotate about the Centre (see effects.xform_code)
+        self.xs, self.xr = 1.0, 0.0
         self.music = spec.get("music", False)   # shows the Music character controls even before audio is on
         self.speed, self.clock = 1.0, 0.0
         # wrap the effect so it can be faded against its input (u_mix)
-        code = spec["code"].replace("void main()", "void fx_main()", 1) + E.BLEND_WRAPPER
+        body = E.xform_code(spec["code"]) if spec.get("xform") else spec["code"]
+        code = body.replace("void main()", "void fx_main()", 1) + E.BLEND_WRAPPER
         self.prog = ctx.program(vertex_shader=E.VERT, fragment_shader=E.HEAD + code)
         self.vao = ctx.vertex_array(self.prog, [])
         # effects with memory: each "state" pass updates its own float buffer every frame and can
@@ -190,6 +193,7 @@ class Effect:
         self.autos = copy_autos(f.autos)
         self.listen, self.rng, self.resp = f.listen, list(f.rng), list(f.resp) if f.resp else None
         self.char, self.mresp = f.char, f.mresp
+        self.xs, self.xr = f.xs, f.xr
 
     def char_resp(self):
         """[attack, release] seconds an audio-following setting uses when it has none of its own: set by this
@@ -222,6 +226,7 @@ class Effect:
         set_u(prog, "u_swell", beat["swell"])
         set_u(prog, "u_music", beat["music"])
         set_u(prog, "u_char", self.char)
+        set_u(prog, "u_xf", (self.xs, math.radians(self.xr)))
         set_u(prog, "u_beats", beat["count"])
         set_u(prog, "u_since", beat["since"])
         set_u(prog, "u_beatlen", beat["len"])
@@ -1567,7 +1572,7 @@ class App:
         return dict(id=f.id, on=f.on, amt=f.amt, mod=f.mod, opacity=f.opacity, blend=f.blend,
                     centre=f.centre, opts=f.opts, params=f.pvals, speed=f.speed,
                     target=f.target, expanded=f.expanded, colours=f.colours, keep_out=f.keep_out, autos=f.autos,
-                    listen=f.listen, rng=f.rng, resp=f.resp, char=f.char, mresp=f.mresp)
+                    listen=f.listen, rng=f.rng, resp=f.resp, char=f.char, mresp=f.mresp, xs=f.xs, xr=f.xr)
 
     def item_from_dict(self, e, by_id, used):
         """Build a chain item from a look; effects are reused objects (one of each exists)."""
@@ -1611,6 +1616,7 @@ class App:
         f.rng = [float(x) for x in e.get("rng", [80.0, 250.0])][:2]
         f.resp = [float(x) for x in e["resp"]][:2] if e.get("resp") else None
         f.char, f.mresp = int(e.get("char", 0)), float(e.get("mresp", 0.5))
+        f.xs, f.xr = float(e.get("xs", 1.0)), float(e.get("xr", 0.0))
         return f
 
     # --- auto-play
@@ -1861,7 +1867,7 @@ class App:
                 v = a["lo"] + (a["hi"] - a["lo"]) * w
                 if key == "amt":
                     f.amt = f.amt_smooth = v
-                elif key in ("opacity", "speed"):
+                elif key in ("opacity", "speed", "xs", "xr"):
                     setattr(f, key, v)
                 elif key[:1] == "p" and key[1:].isdigit() and int(key[1:]) < len(f.pvals):
                     f.pvals[int(key[1:])] = v

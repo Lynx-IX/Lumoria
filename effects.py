@@ -195,6 +195,29 @@ void main(){
   o = vec4(mix(b, blendColor(b, e, u_blend), u_mix * m), 1.);
 }"""
 
+# Shared Scale / Rotate for overlay effects. The effect is drawn as if the frame were scaled and turned about its
+# Centre: its own picture coordinates (v_uv) are swapped for transformed ones, while the INPUT picture, read through
+# tx(), is mapped back so only the effect moves and the video underneath stays where it is.
+def xform_code(code):
+    import re
+    code = code.replace("void main()", "void fx_inner()", 1)
+    code = re.sub(r"\bv_uv\b", "xf_uv", code)
+    code = re.sub(r"\btx\(", "txx(", code)
+    return """
+uniform vec2 u_xf;   // scale, angle (radians)
+vec2 xf_uv;
+vec2 xfMap(vec2 uv, float dir){   // dir -1: the effect's coordinates for this pixel, +1: back again
+  float asp = u_res.x/u_res.y, a = u_xf.y*dir, c = cos(a), s = sin(a);
+  vec2 p = (uv - u_centre)*vec2(asp, 1.);
+  p = mat2(c, s, -s, c)*p;
+  p = dir < 0. ? p/max(u_xf.x, 1e-3) : p*max(u_xf.x, 1e-3);
+  return p/vec2(asp, 1.) + u_centre;
+}
+vec4 txx(vec2 uv){ return tx(xfMap(uv, 1.)); }
+""" + code + """
+void main(){ xf_uv = xfMap(v_uv, -1.); fx_inner(); }
+"""
+
 # AI mask refinement = colour guided filter (He et al.), guided by the full-res clean feed. Within each
 # window the mask is fitted as a linear function of the image colour, so its edge lands where the colours
 # change (hair, fingers, clothing) even if the AI's mask is soft or a few pixels off.
@@ -831,7 +854,7 @@ void main(){ vec3 c = tx(v_uv).rgb; float k = clamp(u_amt-.35, 0., 1.);
   o = vec4(mix(c, vec3(1), k*.85), 1.); }"""),
 
     # ---- Overlay. Soap-bubble spheres, each holding the video; some drift, some fly at the viewer.
-    dict(id="bubbles", name="Bubbles", amt=.4, amt_label="Size", center=True, speed=True,
+    dict(id="bubbles", name="Bubbles", amt=.4, amt_label="Size", center=True, speed=True, xform=True,
          params=[("Variety", .5), ("Wobble", .3), ("Shimmer", .6), ("Lifetime", 8., 2., 30., "%.0f s")],
          options=[("Inside", ["With effects", "Clean feed", "Reflections (recursive)"], 0),
                   ("Background", ["With effects", "Clean feed", "Dark"], 0),
@@ -1476,7 +1499,7 @@ NEW_EFFECTS = [
                   ("Fluid", ["Off", "Swirl", "Flow around subject"], 0)],
          code="void main(){ o = tx(v_uv); }"),
 
-    dict(id="leaks", name="Light Leaks & Flares", amt=.6, amt_label="Intensity", center=True, speed=True,
+    dict(id="leaks", name="Light Leaks & Flares", amt=.6, amt_label="Intensity", center=True, speed=True, xform=True,
          params=[("Softness", .5), ("Flare streak", .5), ("Movement size", .5), ("Beat flash", .3)],
          options=[("Style", ["Light leaks", "Lens flare", "Both"], 0),
                   ("Colour", PALETTES, 10),
@@ -1524,7 +1547,7 @@ void main(){
   light *= clamp(u_amt, 0., 1.6);
   o = vec4(1. - (1. - base)*(1. - clamp(light, 0., 1.)), 1.); }"""),
 
-    dict(id="rays", name="Light Rays", amt=.6, amt_label="Intensity", center=True, mask_when=(0, (0,)),
+    dict(id="rays", name="Light Rays", amt=.6, amt_label="Intensity", center=True, xform=True, mask_when=(0, (0,)),
          params=[("Length", .6), ("Threshold", .55), ("Spread", .5)],
          options=[("Rays from", ["Behind subject (AI)", "Bright areas"], 0),
                   ("Colour", PALETTES, 12),
@@ -1556,7 +1579,7 @@ void main(){
   vec3 rays = col*acc*clamp(u_amt, 0., 1.6)*1.3;
   o = vec4(1. - (1. - base)*(1. - clamp(rays, 0., 1.)), 1.); }"""),
 
-    dict(id="shapes", name="Neon Shapes", amt=.4, amt_label="Size", speed=True,
+    dict(id="shapes", name="Neon Shapes", amt=.4, amt_label="Size", speed=True, center=True, xform=True,
          params=[("Line width", .35), ("Glow", .5), ("Spin", .5), ("Beat pulse", .5)],
          options=[("Shape", ["Rings", "Triangles", "Squares", "Hexagons", "Mixed"], 4),
                   ("Count", ["6", "12", "20"], 1),
@@ -1597,7 +1620,7 @@ void main(){
   }
   o = vec4(base + light, 1.); }"""),
 
-    dict(id="visualizer", name="Audio Visualizer", amt=.5, amt_label="Height", center=True,
+    dict(id="visualizer", name="Audio Visualizer", amt=.5, amt_label="Height", center=True, xform=True,
          params=[("Bars", .5), ("Glow", .5), ("Width", .5)],
          options=[("Style", ["Spectrum bars", "Mirrored bars", "Circle", "Waveform", "Pulse rings"], 0),
                   ("Position", ["Bottom", "Middle", "Top"], 0),
@@ -2372,14 +2395,14 @@ void main(){
 
     # Stained Glass: the picture as glass cells (each the colour at its centre) with dark leading between them
     # and a little light falling across each pane. Cells can re-shatter on the beat or drift.
-    dict(id="stainedglass", name="Stained Glass", amt=.45, amt_label="Cells", speed=True, center=True,
+    dict(id="stainedglass", name="Stained Glass", amt=.45, amt_label="Cells", speed=True, center=True, music=True,
          params=[("Leading", .35), ("Glass light", .5), ("Colour boost", .4)],
          options=[("Shatter", ["Still", "New pattern on the beat", "Drifting cells"], 0),
                   ("Leading colour", ["Dark lead", "Gold", "White", "Glowing (palette)"], 0),
                   ("Colours", PALETTES, 0)], code="""
 vec2 cellPoint(vec2 c, float seed){
   vec2 h = vec2(hash(c + seed), hash(c + seed + 17.3));
-  if (u_opt0 == 2) h = .5 + .45*sin(u_time*.5 + h*6.2831853);
+  if (u_opt0 == 2) h = .5 + .45*sin(mClock()*.5 + h*6.2831853);   // drifting: on the music's time
   return c + .1 + .8*h;
 }
 void main(){
@@ -2754,7 +2777,7 @@ AUDIO_EFFECTS = [
     # Spectrum Terrain: the spectrum's last couple of seconds as rows of ridges receding into the distance, newest at
     # the front: like the famous pulsar plot. Each ridge hides the ones behind it, with the picture (or black) showing
     # through, so it works over any source.
-    dict(id="terrain", name="Spectrum Terrain", amt=.5, amt_label="Height", speed=True,
+    dict(id="terrain", name="Spectrum Terrain", amt=.5, amt_label="Height", speed=True, center=True, xform=True,
          state=[TERRAIN_HIST], state_size=[(1, "f2")],
          params=[("Scroll speed", .45), ("Lines", .7), ("Line weight", .4), ("Glow", .35)],
          options=[("Style", ["Ridge lines", "Solid terrain"], 0),
@@ -2797,7 +2820,7 @@ void main(){
 
     # Vectorscope: the stereo sound drawn as light (left against right): a line for a mono sound, a swirling cloud for
     # a wide mix, with an afterglow like a real scope. Nothing but the sound is needed; it glows over any picture.
-    dict(id="vectorscope", name="Vectorscope", amt=.5, amt_label="Size", center=True,
+    dict(id="vectorscope", name="Vectorscope", amt=.5, amt_label="Size", center=True, xform=True,
          state=[SCOPE_TRACE], state_size=[(1, "f2")],
          params=[("Afterglow", .55), ("Line weight", .4), ("Brightness", .6)],
          options=[("Draw", ["Lines", "Dots"], 0), ("Colour", PALETTES, 1), ("Colour motion", COLOUR_MOTION, 0),
@@ -2822,7 +2845,7 @@ void main(){
 
     # Audio Warp: the picture bends with the music: the spectrum bounces its columns, the bass pumps it, and every
     # kick, snare and hat sends a ring rippling out from the centre. Strength is the main slider.
-    dict(id="audiowarp", name="Audio Warp", amt=.5, amt_label="Strength", center=True,
+    dict(id="audiowarp", name="Audio Warp", amt=.5, amt_label="Strength", center=True, music=True,
          params=[("Ring width", .45), ("Colour split", .35), ("Sideways", .3)],
          options=[("Mode", ["Spectrum waves", "Bass pump", "Shockwaves on hits", "All of them"], 3),
                   ("Rings from", ["The centre", "A different spot per drum"], 0)],
@@ -2840,11 +2863,11 @@ void main(){
   vec2 d = vec2(0.);
   float spec = spectrum(v_uv.x);
   if (u_opt0 == 0 || u_opt0 == 3) {   // each column bounces with its own part of the spectrum
-    d.y += (spec - .3)*A*.16;
+    d.y += (spec - .3)*A*.16 + ((u_char == 2) ? sin(v_uv.x*7. + mClock()*1.2)*A*.025*u_swell.w : 0.);
     d.x += (spectrum(v_uv.y) - .3)*A*.12*u_p2;
   }
   if (u_opt0 == 1 || u_opt0 == 3) {   // the bass breathes the whole picture; the pan tilts it
-    float z = (u_bands.x*.7 + u_hits.x*.3)*A*.2;
+    float z = ((u_char == 1 || u_char == 2) ? u_swell.x : u_bands.x*.7 + u_hits.x*.3)*A*.2;   // swell: a slow breath
     p *= 1. - z;
     float a = (u_slow.w - .5)*A*.35;
     p = mat2(cos(a), -sin(a), sin(a), cos(a))*p;
@@ -2904,7 +2927,7 @@ void main(){
 
     # Aurora: a flowing field of colour that follows the music's slow side: loudness swells it, brightness shifts its
     # colour, busyness stirs it up, the pan leans it left or right, and every kick flares it. No picture needed.
-    dict(id="aurora", name="Aurora Field", amt=.6, amt_label="Intensity", speed=True,
+    dict(id="aurora", name="Aurora Field", amt=.6, amt_label="Intensity", speed=True, music=True, char=2, center=True, xform=True,
          params=[("Detail", .5), ("Picture shows", .25), ("Kick flare", .5)],
          options=[("Style", ["Curtains", "Nebula", "Ribbons"], 0),
                   ("Colour", PALETTES, 5), ("Colour motion", COLOUR_MOTION, 0)],
@@ -2914,23 +2937,24 @@ void main(){
   vec3 src = tx(v_uv).rgb;
   float asp = u_res.x/u_res.y;
   vec2 p = vec2(v_uv.x*asp, v_uv.y);
-  float t = u_time*.1;
+  float tc = mClock();                                      // the music's own time: flows, swells or steps on the beat
+  float t = tc*.1;
   float lean = (u_slow.w - .5)*2.;                         // pan: -1 left .. 1 right
   float busy = u_slow.z, energy = u_slow.x;
-  float dens = mix(1.2, 3.2, u_p0);
+  float dens = mix(1.2, 3.2, u_p0)*(1. + .3*u_swell.y);   // the folds tighten as the mids swell
   vec2 q = u_opt0 == 0 ? vec2(p.x*dens*1.2, p.y*dens*.35) : p*dens;
-  q.x -= lean*u_time*.12;                                   // it drifts toward where the sound is
+  q.x -= lean*tc*.12;                                   // it drifts toward where the sound is
   vec2 w = vec2(fbm(q + vec2(t, 0.)), fbm(q + vec2(5.2, 1.3 - t)));
-  float n = fbm(q + w*(1.2 + 3.2*busy) + t*.6);
+  float n = fbm(q + w*(1.2 + 3.2*busy + 2.4*u_swell.x) + t*.6);   // the bass swells fold the smoke over on itself
   float f;
   if (u_opt0 == 0) {          // curtains: bright vertical folds, fading toward the bottom
     f = smoothstep(.28, .85, n)*smoothstep(1.05, .15, v_uv.y + (w.y - .5)*.25);
   } else if (u_opt0 == 1) {   // nebula: soft clouds everywhere
     f = smoothstep(.3, .95, n);
   } else {                    // ribbons: thin bright lines along the folds
-    f = smoothstep(.07, 0., abs(n - .5 - .12*sin(u_time*.3)))*1.3 + smoothstep(.4, .9, n)*.25;
+    f = smoothstep(.07, 0., abs(n - .5 - .12*sin(tc*.3)))*1.3 + smoothstep(.4, .9, n)*.25;
   }
-  float bright = (.2 + 1.1*energy)*clamp(u_amt, 0., 1.)*1.6 + u_hits.x*u_p2*.6;
+  float bright = (.2 + 1.1*energy)*clamp(u_amt, 0., 1.)*1.6 + mPulse(u_hits.x, u_swell.x)*u_p2*.6;   // flare: a hit, or in Swell / Flow a slow glow
   vec3 col = palCycle(u_opt1, n*.8 + u_slow.y*.6 + w.x*.3 + palPhase(u_opt2, v_uv), src);
   vec3 outc = src*u_p1 + col*f*bright;
   o = vec4(outc, 1.); }"""),

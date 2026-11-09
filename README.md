@@ -75,7 +75,8 @@ They live in `samples/`; the welcome (Settings > About > Show the welcome again)
   e.g. to run one effect on the subject and a differently set copy on the background. Copies save with looks.
 - **Outline view (the default):** the list button on the Effects tab (or *Interface → Effects view*) turns the cards into a short
   list of the whole chain in order: power, name, mode, pin and remove on each row, with a thin live amount line.
-  Click a row to open that effect below the list; it closes the one before (Shift-click, or the pin on a row, keeps
+  Click a row to open that effect: beside the list when the sidebar is wide (the list stays in view and scrolls
+  on its own), or right under its row when it's narrow (*Interface → Open effects* forces either). It closes the one before (Shift-click, or the pin on a row, keeps
   several open; *Interface → Opening one* can make "keeps others" the default). Drag a row to reorder, right-click
   for the card menu, number keys still follow the list order. Groups show with their effects indented under them.
 - **Playlist (bottom):** saved looks as tiles. A look is a snapshot of the whole effect chain: build one in the

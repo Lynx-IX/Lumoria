@@ -109,7 +109,7 @@ TOPBAR_H, PLAYLIST_SHUT_H, LABEL_W, GAP = 54, 52, 96, 6   # GAP: draggable seam 
 SETTINGS_FILE = os.path.join(DATA, "ui_settings.json")
 LAYOUT_DEFAULTS = dict(sidebar_w=410.0, playlist_h=196.0, playlist_open=True, scale=1.0, card_cols=0,
                        theme="Console", accent=0, header_tint=False, side_tab=0, welcomed=False,
-                       card_warnings=0, logo_look=0, theme_keys=0, fx_view=1, fx_keep=0)
+                       card_warnings=0, logo_look=0, theme_keys=0, fx_view=1, fx_keep=0, fx_layout=0)
 CARD_MIN_W = 300   # auto grid: a new column of effect cards appears whenever this much more width fits
 
 
@@ -129,6 +129,7 @@ class _State:
     welcome_open = False
     fx_view = 1                    # Effects tab: 0 cards, 1 outline (the default) (a list, with the open effect(s) below it)
     fx_keep = 0                    # outline: 0 opening an effect closes the others, 1 keeps them open
+    fx_layout = 0                  # outline: 0 auto (beside the list when wide, else under its row), 1 under the row, 2 beside
     fx_seen, fx_shift = None, False   # outline: which effects were open last frame; a Shift-click this frame
     pinned = set()                 # outline: effects (by uid) that stay open when another is opened
     confirm_delete = None          # a look waiting for "Delete it?" to be answered
@@ -1314,6 +1315,14 @@ def interface_section():
         imgui.set_tooltip("Cards: every effect is a card in a grid" + chr(10) +
                           "Outline: a short list of the chain in order; the effect you pick opens below it" + chr(10) +
                           "(also the list button on the Effects tab)")
+    label("Open effects")
+    fl = segmented("fxlayout", ("Auto", "Under the row", "Beside the list"), S.fx_layout, CYAN)
+    if fl != S.fx_layout:
+        S.fx_layout = fl
+        save_layout()
+    if imgui.is_item_hovered():
+        imgui.set_tooltip("Outline view: where the effect you open appears" + chr(10) +
+                          "Auto: beside the list when the sidebar is wide, under its row when narrow")
     label("Opening one")
     fk = segmented("fxkeep", ("Closes others", "Keeps others"), S.fx_keep, CYAN)
     if fk != S.fx_keep:
@@ -1733,32 +1742,91 @@ def outline_row(app, f, key, container, depth):
     imgui.pop_id()
 
 
-def outline_view(app):
-    """The Effects tab as a list: every effect in chain order, then the card of each open one below."""
-    flat = list(outline_flat(app.pipe.order))
-    outline_focus(flat)
-    imgui.push_style_color(imgui.Col_.child_bg, CARD)
-    imgui.push_style_color(imgui.Col_.border, BORDER)
-    imgui.push_style_var(imgui.StyleVar_.window_padding, V(6, 4))
-    imgui.begin_child("outline", V(-1, 0),
-                      imgui.ChildFlags_.borders | imgui.ChildFlags_.auto_resize_y
-                      | imgui.ChildFlags_.always_use_window_padding, imgui.WindowFlags_.no_scrollbar)
-    imgui.pop_style_var()
-    imgui.pop_style_color(2)
-    for f, container, key, depth in flat:
-        outline_row(app, f, key, container, depth)
-    imgui.dummy(V(-1, sc(8)))
-    card_drop_target(app.pipe.order, None)   # drop here to send an effect to the end of the chain
-    imgui.end_child()
-    bevel(imgui.get_item_rect_min(), imgui.get_item_rect_max())
-    opened = [(f, container, key) for f, container, key, _ in flat if f.expanded]
-    if opened:
-        imgui.spacing()
-    for f, container, key in opened:
+OUTLINE_LIST_W = 320   # the list's width when the open effects sit beside it
+
+
+def draw_cards(app, entries):
+    """Cards for the open effects, in a grid like the card view (a group takes a full row)."""
+    cols = card_columns()
+    run = []
+
+    def flush():
+        if not run:
+            return
+        if cols == 1:
+            for f, container, key in run:
+                effect_card(app, f, key, container)
+        else:   # card k goes in column k % cols, so each column stacks its own cards
+            imgui.push_style_var(imgui.StyleVar_.cell_padding, V(4, 4))
+            if imgui.begin_table(f"open{run[0][0].uid}", cols,
+                                 imgui.TableFlags_.sizing_stretch_same | imgui.TableFlags_.no_pad_outer_x):
+                for c in range(cols):
+                    imgui.table_next_column()
+                    for f, container, key in run[c::cols]:
+                        effect_card(app, f, key, container)
+                imgui.end_table()
+            imgui.pop_style_var()
+        run.clear()
+
+    for f, container, key in entries:
         if is_group(f):
+            flush()
             group_card(app, f, key, container, show_children=False)
         else:
-            effect_card(app, f, key, container)
+            run.append((f, container, key))
+    flush()
+
+
+def outline_view(app):
+    """The Effects tab as a list of the whole chain. The effects you open sit BESIDE it when the sidebar is wide (so
+    the list stays in view and scrolls on its own), or directly UNDER their own row when it's narrow."""
+    flat = list(outline_flat(app.pipe.order))
+    outline_focus(flat)
+    avail = imgui.get_content_region_avail().x
+    beside = S.fx_layout == 2 or (S.fx_layout == 0 and avail >= sc(OUTLINE_LIST_W) + sc(340) + 8)
+    imgui.push_style_color(imgui.Col_.border, BORDER)
+    if beside:
+        h = max(sc(360), imgui.get_window_height() - sc(90))
+        imgui.push_style_color(imgui.Col_.child_bg, CARD)
+        imgui.push_style_var(imgui.StyleVar_.window_padding, V(6, 4))
+        imgui.begin_child("outline_list", V(sc(OUTLINE_LIST_W), h), imgui.ChildFlags_.borders
+                          | imgui.ChildFlags_.always_use_window_padding)
+        imgui.pop_style_var()
+        imgui.pop_style_color()
+        for f, container, key, depth in flat:
+            outline_row(app, f, key, container, depth)
+        imgui.dummy(V(-1, sc(8)))
+        card_drop_target(app.pipe.order, None)   # drop here to send an effect to the end of the chain
+        imgui.end_child()
+        bevel(imgui.get_item_rect_min(), imgui.get_item_rect_max())
+        imgui.same_line(0, 6)
+        imgui.begin_child("outline_detail", V(-1, h), 0)
+        opened = [(f, container, key) for f, container, key, _ in flat if f.expanded]
+        if opened:
+            draw_cards(app, opened)
+        else:
+            imgui.dummy(V(1, sc(8)))
+            imgui.text_colored(DIM, "Click an effect in the list to open its settings here.")
+            imgui.text_colored(DIM, "Shift-click, or pin it, to keep several open.")
+        imgui.end_child()
+    else:
+        for f, container, key, depth in flat:   # each row is a one-line card, with its settings right under it
+            imgui.push_style_color(imgui.Col_.child_bg, CARD_ON if f.expanded else CARD)
+            imgui.push_style_var(imgui.StyleVar_.window_padding, V(6, 3))
+            imgui.begin_child(f"orow_{f.uid}", V(-1, 0), imgui.ChildFlags_.borders | imgui.ChildFlags_.auto_resize_y
+                              | imgui.ChildFlags_.always_use_window_padding, imgui.WindowFlags_.no_scrollbar)
+            imgui.pop_style_var()
+            imgui.pop_style_color()
+            outline_row(app, f, key, container, depth)
+            imgui.end_child()
+            if f.expanded:
+                if is_group(f):
+                    group_card(app, f, key, container, show_children=False)
+                else:
+                    effect_card(app, f, key, container)
+        imgui.dummy(V(-1, sc(8)))
+        card_drop_target(app.pipe.order, None)
+    imgui.pop_style_color()
 
 
 def draw_items(app, items, top):

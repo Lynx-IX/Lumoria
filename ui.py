@@ -2368,6 +2368,7 @@ def effect_body(app, f):
         imgui.same_line(0, 4)
         if icon_button(fa.ICON_FA_ROTATE_LEFT, "rc", DIM, "Reset to the middle"):
             f.centre = [0.5, 0.5]
+    music_controls(app, f)
     if f.has_speed:
         label("Speed")
         imgui.set_next_item_width(imgui.get_content_region_avail().x - 32)
@@ -2409,6 +2410,33 @@ def range_controls(app, rng):
     imgui.same_line(0, 6)
     imgui.set_next_item_width(w)
     _, rng[1] = slider_float("##rhi", rng[1], 20.0, 16000.0, "%.0f Hz", imgui.SliderFlags_.logarithmic)
+
+
+def music_controls(app, f):
+    """How an audio-following effect feels: Reactive (as before), Swell (breathes with how loud it has been), Flow
+    (travels on a clock that speeds up with the music) or Rhythmic (moves in time with the beat); and how slowly
+    it answers. Shown where an effect can follow the sound."""
+    audio_on = f.mod == MOD_AUDIO or any(a.get("shape") == 7 for a in f.autos.values())
+    if not (f.music or audio_on):
+        return
+    label("Music")
+    names = ("Reactive", "Swell", "Flow", "Rhythmic")
+    c = segmented(f"char{f.uid}", names, f.char, CYAN)
+    if c != f.char:
+        f.char = c
+    if imgui.is_item_hovered():
+        imgui.set_tooltip("Reactive: follows the sound as it happens" + chr(10) +
+                          "Swell: breathes with how loud it has been" + chr(10) +
+                          "Flow: drifts on a clock that speeds up with the music" + chr(10) +
+                          "Rhythmic: moves in time with the beat")
+    label("Response")
+    imgui.set_next_item_width(imgui.get_content_region_avail().x - 32)
+    _, f.mresp = slider_float(f"##mresp{f.uid}", f.mresp, 0.0, 1.0, "%.2f")
+    if imgui.is_item_hovered():
+        imgui.set_tooltip("How slowly audio-driven settings answer: 0 quick .. 1 slow and smooth")
+    imgui.same_line(0, 4)
+    if icon_button(fa.ICON_FA_ROTATE_LEFT, f"rm{f.uid}", DIM, "Back to the middle"):
+        f.mresp = 0.5
 
 
 def listen_controls(app, f):

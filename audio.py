@@ -107,6 +107,8 @@ class AudioAnalyzer:
         self._ranges = {}
         # drum hits: counted in the audio thread, picked up once a frame by update()
         self.hit_sens = 0.5                  # 0 = only the clearest hits .. 1 = every little one
+        self.swell = [0.0, 0.0, 0.0, 0.0]    # bass, mid, high, all: very slow envelopes (the "sustained" feel)
+        self.flow = 0.0                      # a clock that runs faster when the music is busy and never jumps
         self.smooth = 0.3                    # how gradually levels rise and fall: 0 snappy (the old response) .. 1 slow
         self.fast = {k: 0.0 for k in (*BANDS, "all")}   # the old snappy levels, kept for the tempo detector
         self._hits = {k: 0 for k in HITS}
@@ -281,6 +283,17 @@ class AudioAnalyzer:
         tau = 0.014 * 25.0 ** s if target > cur else 0.103 * 19.4 ** s
         return cur + (target - cur) * (1.0 - math.exp(-dt / tau))
 
+    def _slow_signals(self, dt):
+        """Sustained signals for effects that should breathe with the music instead of twitching to it: slow
+        envelopes of each band (about 0.6 s to rise, 2 s to fall) and a flow clock that speeds up with the energy."""
+        lv = self.fast
+        for i, k in enumerate(("bass", "mid", "high", "all")):
+            cur, tgt = self.swell[i], lv[k]
+            tau = 0.6 if tgt > cur else 2.0
+            self.swell[i] = cur + (tgt - cur) * (1.0 - math.exp(-dt / tau))
+        busy = 0.5 * self.swell[3] + 0.5 * self.level.get("energy", 0.0)
+        self.flow += dt * (0.12 + 1.5 * busy)
+
     def pulse(self, key, t):
         """A hit from outside the analyser (the tempo clock's beat), shown straight away."""
         self.hit_now[key], self.hit_t[key] = True, t
@@ -298,6 +311,7 @@ class AudioAnalyzer:
             bands = self._band_raw.copy()
             feat = dict(self._feat)
         live = self.stream is not None
+        self._slow_signals(dt)
         for k in HITS:
             self.hit_now[k] = live and hits[k] > 0
             if self.hit_now[k]:

@@ -98,6 +98,17 @@ uniform float u_beats, u_since, u_beatlen;   // beats counted so far, seconds si
 uniform sampler2D u_audiotex;                // rows: 128-band spectrum (low..high), waveform, left, right
 uniform vec4 u_slow;                         // energy (slow loudness), brightness, busyness, pan (0.5 = middle)
 uniform float u_width;                       // stereo width: 0 mono .. 1 wide
+uniform vec4 u_swell;                        // bass, mid, high, all as very slow envelopes: how loud it has BEEN
+uniform vec4 u_music;                        // flow clock (runs with the energy), beat clock (eased steps), bar position
+uniform int u_char;                          // this effect's Music character: 0 Reactive, 1 Swell, 2 Flow, 3 Rhythmic
+// The time an effect's internal structure should travel on. Reactive is plain effect time (nothing changes); Swell
+// adds the music's flow; Flow travels on the flow clock itself; Rhythmic steps on the beat, eased so it lands on it.
+float mClock(){
+  return u_char == 0 ? u_time : u_char == 1 ? u_time + u_music.x*.5 : u_char == 2 ? u_time*.3 + u_music.x
+       : u_time*.3 + u_music.y*.5;
+}
+// A hit-shaped signal for the character: Reactive and Rhythmic take the hit, Swell and Flow take the slow swell.
+float mPulse(float hit, float swell){ return (u_char == 1 || u_char == 2) ? swell : hit; }
 uniform vec2 u_centre;                       // movable centre for effects with center=True
 uniform float u_dt;                          // seconds since last frame
 uniform float u_speed;                       // the effect's Speed setting

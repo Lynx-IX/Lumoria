@@ -110,6 +110,7 @@ class Effect:
         # rng = its frequency range (Hz) for "range"; resp = None (the main smoothing) or [attack, release] in s
         self.listen, self.rng, self.resp = None, [80.0, 250.0], None
         self.follow, self.follow_t = 0.0, None   # its own smoothed level, when resp is set
+        self.char, self.mresp = 0, 0.5   # Music character (0 Reactive, 1 Swell, 2 Flow, 3 Rhythmic), response time 0..1
         self.live = 0.0
         self.mix = 0.0               # 0..1 fade position, eases toward on/off
         self.opacity = 1.0           # how much of the effect shows over its input
@@ -127,6 +128,7 @@ class Effect:
         self.amt_label = spec.get("amt_label", "")
         # animated effects run on their own clock so Speed can slow, freeze or reverse them
         self.has_speed = spec.get("speed", False)
+        self.music = spec.get("music", False)   # shows the Music character controls even before audio is on
         self.speed, self.clock = 1.0, 0.0
         # wrap the effect so it can be faded against its input (u_mix)
         code = spec["code"].replace("void main()", "void fx_main()", 1) + E.BLEND_WRAPPER
@@ -187,6 +189,16 @@ class Effect:
         self.target, self.tw, self.expanded, self.keep_out = f.target, list(f.tw), f.expanded, f.keep_out
         self.autos = copy_autos(f.autos)
         self.listen, self.rng, self.resp = f.listen, list(f.rng), list(f.resp) if f.resp else None
+        self.char, self.mresp = f.char, f.mresp
+
+    def char_resp(self):
+        """[attack, release] seconds an audio-following setting uses when it has none of its own: set by this
+        effect's Music character and Response time. None = the main Smoothness."""
+        r = 0.4 * 6.25 ** self.mresp   # 0.4x .. 2.5x, the middle is about 1x
+        base = {1: (0.35, 1.8), 2: (0.8, 2.6), 3: (0.0, 0.14)}.get(self.char)
+        if base is None:
+            return None if abs(self.mresp - 0.5) < 0.01 else [0.03 * r, 0.14 * r]
+        return [base[0] * r, base[1] * r]
 
     def apply_uniforms(self, prog, size, dt, level, beat):
         set_u(prog, "u_res", size)
@@ -207,6 +219,9 @@ class Effect:
         set_u(prog, "u_hits", beat["hits"])
         set_u(prog, "u_slow", beat["slow"])
         set_u(prog, "u_width", beat["width"])
+        set_u(prog, "u_swell", beat["swell"])
+        set_u(prog, "u_music", beat["music"])
+        set_u(prog, "u_char", self.char)
         set_u(prog, "u_beats", beat["count"])
         set_u(prog, "u_since", beat["since"])
         set_u(prog, "u_beatlen", beat["len"])
@@ -348,6 +363,7 @@ class Pipeline:
         # beat timing (bass, mid, high levels; beats counted; seconds since the last; seconds per beat)
         self.audio_tex = ctx.texture((128, 4), 1, dtype="f4")   # rows: spectrum, waveform, left, right
         self.beat = dict(bands=(0.0, 0.0, 0.0), hits=(0.0, 0.0, 0.0, 0.0), slow=(0.0, 0.0, 0.0, 0.5), width=0.0,
+                         swell=(0.0, 0.0, 0.0, 0.0), music=(0.0, 0.0, 0.0, 0.0),
                          count=0.0, since=10.0, len=0.5)
         self.level_of = None   # (effect, t) -> its audio level, for effects that listen to their own source
         self.transition, self.trans_time, self.wave_rate = 0, 1.0, 0.25
@@ -1551,7 +1567,7 @@ class App:
         return dict(id=f.id, on=f.on, amt=f.amt, mod=f.mod, opacity=f.opacity, blend=f.blend,
                     centre=f.centre, opts=f.opts, params=f.pvals, speed=f.speed,
                     target=f.target, expanded=f.expanded, colours=f.colours, keep_out=f.keep_out, autos=f.autos,
-                    listen=f.listen, rng=f.rng, resp=f.resp)
+                    listen=f.listen, rng=f.rng, resp=f.resp, char=f.char, mresp=f.mresp)
 
     def item_from_dict(self, e, by_id, used):
         """Build a chain item from a look; effects are reused objects (one of each exists)."""
@@ -1594,6 +1610,7 @@ class App:
         f.listen = e.get("listen") if e.get("listen") in A.SOURCE_KEYS else None
         f.rng = [float(x) for x in e.get("rng", [80.0, 250.0])][:2]
         f.resp = [float(x) for x in e["resp"]][:2] if e.get("resp") else None
+        f.char, f.mresp = int(e.get("char", 0)), float(e.get("mresp", 0.5))
         return f
 
     # --- auto-play
@@ -1768,12 +1785,13 @@ class App:
         the main meter smoothing or its own attack / release."""
         key = f.listen or self.band
         target, level = self.audio.source(key, f.rng)
-        if not f.resp:
+        resp = f.resp or f.char_resp()
+        if not resp:
             return level * self.gain
         if f.follow_t != t:   # once a frame, even if it's drawn twice (in both looks of a crossfade)
             dt = 1 / 60 if f.follow_t is None else min(max(t - f.follow_t, 0.0), 0.1)
             f.follow_t = t
-            tau = f.resp[0] if target > f.follow else f.resp[1]
+            tau = resp[0] if target > f.follow else resp[1]
             f.follow = target if tau <= 1e-3 else f.follow + (target - f.follow) * (1 - math.exp(-dt / tau))
         return f.follow * self.gain
 
@@ -1790,7 +1808,7 @@ class App:
         below 0 lets quiet details move it too."""
         src = A.SOURCE_KEYS[min(a.get("band", 0), len(A.SOURCE_KEYS) - 1)]
         target, level = self.audio.source(src, a.get("rng", [80.0, 250.0]))
-        resp = a.get("resp")
+        resp = a.get("resp") or f.char_resp()
         if resp:
             st = self.auto_state.setdefault((f.uid, key), [0.0, None])
             if st[1] != t:   # once a frame, even if it's drawn twice (both looks of a crossfade)
@@ -2155,6 +2173,12 @@ class App:
         b["hits"] = (lv["kick"], lv["snare"], lv["hat"], lv["accent"])
         b["slow"] = (lv["energy"], lv["bright"], lv["busy"], lv["pan"])
         b["width"] = lv["width"]
+        sw = self.audio.swell
+        ph = tp.phase
+        fr = ph % 1.0
+        b["swell"] = (sw[0] * self.gain, sw[1] * self.gain, sw[2] * self.gain, sw[3] * self.gain)
+        # flow clock, beat clock (steps one beat at a time, eased, so a motion lands on every beat), bar position
+        b["music"] = (self.audio.flow, math.floor(ph) + fr * fr * (3 - 2 * fr), (ph / tp.beats_per_bar) % 1.0, 0.0)
         self.pipe.audio_tex.write(self.audio.shader_data(t).tobytes())
         if self.auto_mode:
             every, unit = self.hold_time()

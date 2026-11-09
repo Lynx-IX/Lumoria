@@ -586,15 +586,16 @@ void main(){ vec2 uv = v_uv; vec2 a = u_centre + (u_amt-.5)*.5;
   uv = a + side*abs(uv - a); o = tx(uv); }"""),
 
     dict(id="kaleido", name="Kaleidoscope", amt=.4, center=True, speed=True,
-         params=[("Zoom", .5)],
-         options=[("Shape", ["Radial", "Triangle mirrors"], 0)], code="""
+         params=[("Zoom", .5), ("Rotation", 0., -180., 180., "%.0f deg"), ("Segments", 6., 2., 32., "%.0f")],
+         options=[("Shape", ["Radial", "Triangle mirrors"], 0),
+                  ("Symmetry", ["Smooth (Amount sets it)", "Exact (Segments sets it)"], 0)], code="""
 float tri(float x, float h){ return h - abs(mod(x, 2.*h) - h); }   // mirror-repeat into 0..h
 void main(){ float asp = u_res.x/u_res.y; vec2 p = v_uv-u_centre; p.x *= asp;
   if (u_opt0 == 1) {
     // three mirrors in a triangle (the classic toy): fold across three line families 60 degrees apart
     // until the point lands in one triangle; amount = more, smaller triangles
     float h = mix(.45, .12, clamp(u_amt, 0., 1.)) * exp2(mix(-1., 1., u_p0));
-    p = rot(u_time*.1) * p;
+    p = rot(u_time*.1 + radians(u_p1)) * p;
     for (int k = 0; k < 4; k++)
       for (int j = 0; j < 3; j++){
         float a = float(j)*2.0943951 + 1.5707963;
@@ -607,8 +608,10 @@ void main(){ float asp = u_res.x/u_res.y; vec2 p = v_uv-u_centre; p.x *= asp;
   }
   // Mirror-repeat the angle: continuous for any segment count, so as n grows a new
   // segment slides open from the far side instead of the pattern jumping.
-  float n = mix(3.,14.,clamp(u_amt,0.,1.)); float s = 3.14159265/n;
-  float r = length(p) / exp2(mix(-1.,1.,u_p0)), a = abs(atan(p.y,p.x));
+  float n = u_opt1 == 1 ? floor(u_p2 + .5) : mix(3.,14.,clamp(u_amt,0.,1.));   // exact: whole segments only
+  float s = 3.14159265/n;
+  float t0 = atan(p.y,p.x) - radians(u_p1);                // Rotation turns the symmetry axes about the centre
+  float r = length(p) / exp2(mix(-1.,1.,u_p0)), a = abs(atan(sin(t0), cos(t0)));
   a = s - abs(mod(a, 2.*s) - s);
   a += u_time*.15;
   p = vec2(cos(a),sin(a))*r; p.x /= asp;
@@ -703,17 +706,17 @@ void main(){ vec2 c = clamp(u_centre, .02, .98), d = v_uv - c;
   o = tx(c + q); }"""),
 
     # ---- Stylize
-    dict(id="pixel", name="Pixelate", amt=.3,
+    dict(id="pixel", name="Pixelate", amt=.3, center=True,
          options=[("Shape", ["Squares", "Circles", "Hexagons", "LED dots"], 0)], code="""
 vec2 hexCentre(vec2 p, float s){
   vec2 r = vec2(1., 1.7320508)*s, h = r*.5;
   vec2 a = mod(p, r) - h, b = mod(p - h, r) - h;
   return dot(a,a) < dot(b,b) ? p - a : p - b; }
 void main(){ float s = floor(mix(3.,56.,clamp(u_amt*u_amt,0.,1.)));
-  vec2 px = v_uv*u_res;
-  if (u_opt0 == 2) { o = tx(hexCentre(px, s*.6)/u_res); return; }
+  vec2 px = (v_uv - u_centre)*u_res;   // the grid is laid out from the centre
+  if (u_opt0 == 2) { o = tx(hexCentre(px, s*.6)/u_res + u_centre); return; }
   vec2 c = (floor(px/s)+.5)*s;
-  vec3 col = tx(c/u_res).rgb;
+  vec3 col = tx(c/u_res + u_centre).rgb;
   float d = length(px - c)/(s*.5);
   if (u_opt0 == 1) col *= smoothstep(1., .85, d);
   else if (u_opt0 == 3) col = col*1.35*smoothstep(.85, .3, d) + col*.12;
@@ -1652,7 +1655,7 @@ void main(){
   o = vec4(base*(1. - shape*.85) + col*(shape*1.2 + glow*u_p1*1.5), 1.); }"""),
 
     # ---- Stylize
-    dict(id="ascii", name="ASCII / Matrix", amt=.35, amt_label="Character size", speed=True,
+    dict(id="ascii", name="ASCII / Matrix", amt=.35, amt_label="Character size", speed=True, center=True,
          params=[("Contrast", .5), ("Picture shows", .5)],
          options=[("Style", ["ASCII", "Matrix rain", "Binary"], 0),
                   ("Colour", PALETTES, 13),
@@ -1661,9 +1664,9 @@ void main(){
          code=GLYPHS + """
 void main(){
   float cs = floor(mix(6., 30., clamp(u_amt, 0., 1.)));
-  vec2 px = v_uv*u_res;
+  vec2 px = (v_uv - u_centre)*u_res;   // characters are laid out from the centre
   vec2 cell = floor(px/cs), f = fract(px/cs);
-  vec2 cuv = (cell + .5)*cs/u_res;
+  vec2 cuv = (cell + .5)*cs/u_res + u_centre;
   vec3 src = tx(cuv).rgb;
   float l = clamp((lum(src) - .5)*mix(.8, 2.4, u_p0) + .5, 0., 1.);
   vec3 ink = palCycle(u_opt1, palPhase(u_opt2, cuv), src*1.3);
@@ -1688,7 +1691,7 @@ void main(){
   vec3 bg = u_opt3 == 1 ? tx(v_uv).rgb*.18 : vec3(0.);
   o = vec4(bg + col, 1.); }"""),
 
-    dict(id="halftone", name="Halftone / Comic", amt=.35, amt_label="Dot size",
+    dict(id="halftone", name="Halftone / Comic", amt=.35, amt_label="Dot size", center=True,
          params=[("Angle", 15., 0., 90., "%.0f deg"), ("Ink lines", .5)],
          options=[("Style", ["CMYK print", "Dots", "Comic", "Engraving lines"], 0),
                   ("Paper", ["White", "Black", "Video"], 0),
@@ -1700,7 +1703,7 @@ float dots(vec2 px, float ang, int ch){
   vec2 rp = rot(ang)*px;
   float s = cs();
   vec2 cell = (floor(rp/s) + .5)*s;
-  vec3 c = tx(rot(-ang)*cell/u_res).rgb;
+  vec3 c = tx(rot(-ang)*cell/u_res + u_centre).rgb;
   float k = 1. - max(c.r, max(c.g, c.b));
   float v = ch == 0 ? (1. - c.r - k)/max(1. - k, 1e-3) : ch == 1 ? (1. - c.g - k)/max(1. - k, 1e-3)
           : ch == 2 ? (1. - c.b - k)/max(1. - k, 1e-3) : ch == 3 ? k : 1. - lum(c);
@@ -1715,7 +1718,7 @@ float inkEdge(vec2 uv){
   return smoothstep(mix(.4, .08, u_p1), mix(.5, .15, u_p1), length(vec2(gx, gy)));
 }
 void main(){
-  vec2 px = v_uv*u_res;
+  vec2 px = (v_uv - u_centre)*u_res;   // dots are laid out from the centre
   float a = radians(u_p0);
   vec3 src = tx(v_uv).rgb;
   bool dark = u_opt1 == 1;
@@ -2358,7 +2361,7 @@ void main(){
 
     # Stained Glass: the picture as glass cells (each the colour at its centre) with dark leading between them
     # and a little light falling across each pane. Cells can re-shatter on the beat or drift.
-    dict(id="stainedglass", name="Stained Glass", amt=.45, amt_label="Cells", speed=True,
+    dict(id="stainedglass", name="Stained Glass", amt=.45, amt_label="Cells", speed=True, center=True,
          params=[("Leading", .35), ("Glass light", .5), ("Colour boost", .4)],
          options=[("Shatter", ["Still", "New pattern on the beat", "Drifting cells"], 0),
                   ("Leading colour", ["Dark lead", "Gold", "White", "Glowing (palette)"], 0),
@@ -2372,7 +2375,7 @@ void main(){
   float asp = u_res.x/u_res.y;
   float n = mix(70., 5., clamp(u_amt, 0., 1.));          // cells down the picture
   float seed = u_opt0 == 1 ? floor(u_beats)*3.17 : 0.;
-  vec2 p = v_uv*vec2(asp, 1.)*n, g = floor(p);
+  vec2 p = (v_uv - u_centre)*vec2(asp, 1.)*n, g = floor(p);   // laid out from the centre
   vec2 best = vec2(0.), bestCell = vec2(0.); float d1 = 1e9;
   for (int y = -1; y <= 1; y++) for (int x = -1; x <= 1; x++){
     vec2 c = g + vec2(x, y), q = cellPoint(c, seed); float d = dot(q - p, q - p);
@@ -2384,7 +2387,7 @@ void main(){
     vec2 q = cellPoint(c, seed);
     edge = min(edge, dot((best + q)*.5 - p, normalize(q - best)));
   }
-  vec2 centre = best/n/vec2(asp, 1.);
+  vec2 centre = best/n/vec2(asp, 1.) + u_centre;
   vec3 glass = (tx(centre).rgb*2. + tx(mix(centre, v_uv, .5)).rgb)/3.;
   float l = lum(glass);
   glass = clamp(mix(vec3(l), glass, 1. + u_p2*1.5)*(1. + u_p2*.25), 0., 1.);
@@ -2714,11 +2717,11 @@ vec2 scopePoint(float t, float R){
 void main(){
   float asp = u_res.x/u_res.y;
   vec2 p = (v_uv - u_centre)*vec2(asp, 1.);
-  float R = mix(.12, .45, clamp(u_amt, 0., 1.));
+  float R = .12 + 1.2*pow(clamp(u_amt, 0., 1.), 2.6);   // up to ~1.3 picture heights: bigger than the frame
   float keep = texture(u_s0, v_uv).r*pow(mix(.55, .97, u_p0), u_dt*60.);   // the afterglow
   float inten = 0.;
   if (length(p) < R*1.6) {
-    float w = mix(.0022, .009, u_p1);
+    float w = mix(.0022, .009, u_p1)*(.6 + .8*R);
     vec2 a = scopePoint(0., R);
     for (int i = 1; i < 128; i++){
       float t = float(i)/127.;
@@ -2795,7 +2798,7 @@ void main(){
   float s = clamp(texture(u_s0, v_uv).r, 0., 2.);
   float asp = u_res.x/u_res.y;
   vec2 p = (v_uv - u_centre)*vec2(asp, 1.);
-  float R = mix(.12, .45, clamp(u_amt, 0., 1.));
+  float R = .12 + 1.2*pow(clamp(u_amt, 0., 1.), 2.6);   // up to ~1.3 picture heights: bigger than the frame
   vec3 col = palCycle(u_opt1, length(p)/R*.6 + palPhase(u_opt2, v_uv) + s*.15, base);
   vec3 outc = bg + col*s*mix(.9, 2.4, u_p2);
   if (u_opt3 == 1) {   // graticule: a ring and a cross, faint

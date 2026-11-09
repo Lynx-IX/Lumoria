@@ -3,6 +3,7 @@ import ctypes
 import json
 import math
 import os
+import re
 import webbrowser
 from ctypes import wintypes
 
@@ -109,7 +110,7 @@ TOPBAR_H, PLAYLIST_SHUT_H, LABEL_W, GAP = 54, 52, 96, 6   # GAP: draggable seam 
 SETTINGS_FILE = os.path.join(DATA, "ui_settings.json")
 LAYOUT_DEFAULTS = dict(sidebar_w=410.0, playlist_h=196.0, playlist_open=True, scale=1.0, card_cols=0,
                        theme="Console", accent=0, header_tint=False, side_tab=0, welcomed=False,
-                       card_warnings=0, logo_look=0, theme_keys=0, fx_view=1, fx_keep=0, fx_layout=0)
+                       card_warnings=0, logo_look=0, theme_keys=0, fx_view=1, fx_keep=0, fx_layout=0, num_boxes=1)
 CARD_MIN_W = 300   # auto grid: a new column of effect cards appears whenever this much more width fits
 
 
@@ -128,6 +129,7 @@ class _State:
     welcomed = False               # the welcome window has been seen (Settings > About shows it again)
     welcome_open = False
     fx_view = 1                    # Effects tab: 0 cards, 1 outline (the default) (a list, with the open effect(s) below it)
+    num_boxes = 1                  # a number box beside each wide slider, to type an exact value
     fx_keep = 0                    # outline: 0 opening an effect closes the others, 1 keeps them open
     fx_layout = 0                  # outline: 0 auto (beside the list when wide, else under its row), 1 under the row, 2 beside
     fx_seen, fx_shift = None, False   # outline: which effects were open last frame; a Shift-click this frame
@@ -459,6 +461,10 @@ def typeable(widget, default_fmt=None):
         return wrapped_inner(label_, value, *args, **kw)
 
     def wrapped_inner(label_, value, *args, **kw):
+        box_w = sc(70)
+        boxed = bool(S.num_boxes and default_fmt is not None and imgui.calc_item_width() >= sc(210))
+        if boxed:   # leave room for a number box after the slider, inside the width it was given
+            imgui.set_next_item_width(imgui.calc_item_width() - box_w - 4)
         own = default_fmt is not None and imgui.get_id(label_) not in _typing
         if own:   # imgui centres the number, right where the handle sits at mid values; hide it, draw our own
             imgui.push_style_color(imgui.Col_.text, CLEAR)
@@ -466,7 +472,8 @@ def typeable(widget, default_fmt=None):
         key = imgui.get_item_id()
         if own:
             imgui.pop_style_color()
-            slider_value_text(new, args, kw, default_fmt)
+            if not boxed:   # with a number box beside it, the box shows the value
+                slider_value_text(new, args, kw, default_fmt)
         if imgui.is_item_active() and imgui.get_io().want_text_input:
             _typing.add(key)
         else:
@@ -476,6 +483,20 @@ def typeable(widget, default_fmt=None):
             imgui.set_keyboard_focus_here(-1)
         elif imgui.is_item_activated():
             _slider_start[key] = value
+        if boxed:   # the number box: type a value and press Enter (or click away); kept within the slider's range
+            fmt = args[2] if len(args) > 2 else kw.get("format", default_fmt)
+            found = re.search(r"%[-+0-9.]*[dfgeE]", fmt or "")
+            num_fmt = found.group(0) if found else "%.3f"
+            lo, hi = args[0], args[1]
+            imgui.same_line(0, 4)
+            imgui.set_next_item_width(box_w)
+            flags = imgui.InputTextFlags_.enter_returns_true | imgui.InputTextFlags_.auto_select_all
+            if default_fmt == "%d":
+                typed, v2 = imgui.input_int(f"##nb_{label_}", int(new), 0, 0, flags)
+            else:
+                typed, v2 = imgui.input_float(f"##nb_{label_}", float(new), 0.0, 0.0, num_fmt, flags)
+            if typed:
+                new, changed = type(value)(min(max(v2, min(lo, hi)), max(lo, hi))), True
         return changed, new
     return wrapped
 
@@ -1315,6 +1336,14 @@ def interface_section():
         imgui.set_tooltip("Cards: every effect is a card in a grid" + chr(10) +
                           "Outline: a short list of the chain in order; the effect you pick opens below it" + chr(10) +
                           "(also the list button on the Effects tab)")
+    label("Number boxes")
+    nb = segmented("numboxes", ("Off", "On"), S.num_boxes, CYAN)
+    if nb != S.num_boxes:
+        S.num_boxes = nb
+        save_layout()
+    if imgui.is_item_hovered():
+        imgui.set_tooltip("A small box beside each wide slider to type an exact value (Enter to apply)" + chr(10) +
+                          "Double-click or Ctrl+click a slider also works either way")
     label("Open effects")
     fl = segmented("fxlayout", ("Auto", "Under the row", "Beside the list"), S.fx_layout, CYAN)
     if fl != S.fx_layout:
@@ -1506,6 +1535,11 @@ def audio_section(app):
                               "Busy: how much is changing   Pan: where the sound sits, left to right")
     label("Sensitivity")
     _, app.gain = slider_float("##gain", app.gain, 0.2, 3.0, "%.2f")
+    label("Smoothness")
+    _, app.audio.smooth = slider_float("##smooth", app.audio.smooth, 0.0, 1.0, "%.2f")
+    if imgui.is_item_hovered():
+        imgui.set_tooltip("How gradually audio-driven effects rise and fall" + chr(10) +
+                          "0 = Snappy (quick, percussive)   1 = slow and flowing (good for ambient music)")
     label("Hit sensitivity")
     _, app.audio.hit_sens = slider_float("##hitsens", app.audio.hit_sens, 0.0, 1.0, "%.2f")
     if imgui.is_item_hovered():

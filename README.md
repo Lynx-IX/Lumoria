@@ -148,6 +148,8 @@ Right-click any slider on an effect card (Amount, Opacity, Speed and every effec
 
 Different sliders on one effect can follow different sounds: the kaleidoscope's zoom on the hats, its rotation on
 the bass. Settings are saved with looks. *Hit sensitivity* (Audio card) sets how easily a drum counts as a hit.
+*Smoothness* sets how gradually audio-driven effects rise and fall: 0 is quick and percussive, 1 is slow and flowing (good for ambient music).
+Every wide slider also has a number box beside it for typing an exact value (Settings > Interface > Number boxes).
 
 ## Tempo
 One beat clock drives beat effects, auto-play and look timing (Settings > Tempo; live in the playlist bar).

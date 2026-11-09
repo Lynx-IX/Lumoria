@@ -1892,7 +1892,7 @@ class App:
     # --- session: the current setup is saved continuously and restored on the next launch
     def session_data(self):
         p = self.pipe
-        return dict(version=2, band=self.band, gain=self.gain, hit_sens=self.audio.hit_sens,
+        return dict(version=2, band=self.band, gain=self.gain, hit_sens=self.audio.hit_sens, smooth=self.audio.smooth,
                     current=self.current_preset,
                     audio_input=self.audio.device_name if self.audio.stream else None,
                     transition=p.transition, trans_time=p.trans_time, trans_unit=p.trans_unit, wave_rate=p.wave_rate,
@@ -1934,6 +1934,7 @@ class App:
         p.trans_time, p.wave_rate = data.get("trans_time", p.trans_time), data.get("wave_rate", p.wave_rate)
         p.trans_unit = data.get("trans_unit", p.trans_unit)
         self.audio.hit_sens = float(data.get("hit_sens", self.audio.hit_sens))
+        self.audio.smooth = float(data.get("smooth", self.audio.smooth))
         tm = data.get("tempo", {})
         self.tempo.bpm = tm.get("bpm", self.tempo.bpm)
         self.tempo.source = tm.get("source", self.tempo.source)
@@ -2122,7 +2123,7 @@ class App:
         # the tempo follows the kick drum; music with no kick for a while falls back to bass swells
         # (a simple detector with hysteresis, so one swell counts once)
         beat = au.hit_now["kick"]
-        bass = au.level["bass"] if au.stream else 0.0
+        bass = au.fast["bass"] if au.stream else 0.0   # the snappy level, whatever Smoothness is set to
         swell = False
         if self.beat_armed and bass > 0.65:
             swell, self.beat_armed = True, False

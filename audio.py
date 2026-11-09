@@ -107,6 +107,8 @@ class AudioAnalyzer:
         self._ranges = {}
         # drum hits: counted in the audio thread, picked up once a frame by update()
         self.hit_sens = 0.5                  # 0 = only the clearest hits .. 1 = every little one
+        self.smooth = 0.3                    # how gradually levels rise and fall: 0 snappy (the old response) .. 1 slow
+        self.fast = {k: 0.0 for k in (*BANDS, "all")}   # the old snappy levels, kept for the tempo detector
         self._hits = {k: 0 for k in HITS}
         self.hit_now = {k: False for k in HITS}   # hit this frame (meters, tempo)
         self.hit_t = {k: -10.0 for k in HITS}
@@ -272,6 +274,13 @@ class AudioAnalyzer:
         r[0] = min(v, r[0] + (0.0002 if slow else 0.0008))   # slow-rising floor
         return max(0.0, (v - r[0]) / max(0.08, r[1] - r[0]))
 
+    def _ease(self, cur, target, dt):
+        """A level moving toward its target at the Smoothness setting's speed: from the old snappy response (about
+        14 ms up, 100 ms down) to a slow, flowing one (about 0.35 s up, 2 s down), whatever the frame rate."""
+        s = min(1.0, max(0.0, self.smooth))
+        tau = 0.014 * 25.0 ** s if target > cur else 0.103 * 19.4 ** s
+        return cur + (target - cur) * (1.0 - math.exp(-dt / tau))
+
     def pulse(self, key, t):
         """A hit from outside the analyser (the tempo clock's beat), shown straight away."""
         self.hit_now[key], self.hit_t[key] = True, t
@@ -315,7 +324,8 @@ class AudioAnalyzer:
             target = self._autorange(self._range[k], v)
             cur = self.level[k]
             self.target[k] = target
-            self.level[k] = cur + (target - cur) * (0.7 if target > cur else 0.15)
+            self.level[k] = self._ease(cur, target, dt)
+            self.fast[k] += (target - self.fast[k]) * (0.7 if target > self.fast[k] else 0.15)
         # slow and stereo measures: smooth, and relative to this music's own range
         self._energy += (raw["all"] - self._energy) * (1 - math.exp(-dt / 1.5))
         slow = dict(energy=self._autorange(self._range["energy"], self._energy, slow=True),
@@ -337,7 +347,7 @@ class AudioAnalyzer:
             db = 20 * math.log10(float(bands[sel].mean()) + 1e-9)
             target = self._autorange(r["range"], float(np.clip((db + 75) / 75, 0, 1)))
             r["target"] = target
-            r["level"] += (target - r["level"]) * (0.7 if target > r["level"] else 0.15)
+            r["level"] = self._ease(r["level"], target, dt)
 
     def range_level(self, lo, hi):
         """(target, level) for a frequency range in Hz. The first ask starts measuring it (0 until then)."""

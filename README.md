@@ -128,6 +128,22 @@ the same input.
 Beat effects (Glitch *On the beat*, Bubbles *Pop on beat*, Datamosh *On the beat*, visualizer rings, Neon
 Shapes' beat pulse, *Audio* colour motion) follow the bass beat; with no input they tick at 120 BPM.
 
+## Audio on any slider
+Right-click any slider on an effect card (Amount, Opacity, Speed and every effect-specific slider) and choose
+*Shape: Audio* to make it follow the music; it shows a music note beside it. The menu has:
+- **Listens to:** Bass / Mids / Highs / All, the drums (Kick, Snare, Hats, Big kicks), the tempo Beat, or a
+  **frequency range** you pick on the live spectrum (e.g. only the vocals).
+- **Feel:** one-click starting points: *Subtle* (a slow swell), *Punchy* (quick and snappy), *Hit* (only loud hits,
+  then it drops away fast).
+- **Response:** the main smoothing, or your own **attack** and **release** times.
+- **Sensitivity, Threshold, Curve:** how loud the sound must be to move it, and whether quiet sounds count more
+  (curve left: subtle, always moving) or only loud ones do (curve right: dramatic).
+- **From / To:** the slider's range, so a small range is subtle and a full range is dynamic.
+- Live **Hearing** and **Moving it** meters show what it hears and what it drives.
+
+Different sliders on one effect can follow different sounds: the kaleidoscope's zoom on the hats, its rotation on
+the bass. Settings are saved with looks. *Hit sensitivity* (Audio card) sets how easily a drum counts as a hit.
+
 ## Tempo
 One beat clock drives beat effects, auto-play and look timing (Settings > Tempo; live in the playlist bar).
 Source: **Audio** (follows the bass, steady through quiet parts), **Tap** (`T`, the TAP button or a MIDI pad),

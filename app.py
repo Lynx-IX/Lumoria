@@ -185,7 +185,7 @@ class Effect:
         self.centre, self.opts, self.pvals = list(f.centre), list(f.opts), list(f.pvals)
         self.colours = [list(c) for c in f.colours]
         self.target, self.tw, self.expanded, self.keep_out = f.target, list(f.tw), f.expanded, f.keep_out
-        self.autos = {k: dict(a) for k, a in f.autos.items()}
+        self.autos = copy_autos(f.autos)
         self.listen, self.rng, self.resp = f.listen, list(f.rng), list(f.resp) if f.resp else None
 
     def apply_uniforms(self, prog, size, dt, level, beat):
@@ -962,10 +962,17 @@ class VirtualCam:
 
 # ---------------------------------------------------------------- app + UI
 
+def copy_autos(autos):
+    """A copy of an effect's automations that shares no lists (the frequency range, the response times)."""
+    return {k: {kk: (list(v) if isinstance(v, list) else v) for kk, v in a.items()} for k, a in autos.items()}
+
+
 class App:
     def __init__(self, ctx, out_win):
         self.pipe = Pipeline(ctx)
         self.pipe.level_of = self.effect_level
+        self.auto_state = {}   # (effect uid, setting) -> [smoothed level, last time]: audio-driven sliders' own meters
+        self.auto_live = {}    # (effect uid, setting) -> (what it hears, what it drives 0..1), for the menu's meters
         self.out_win = out_win
         self.audio = AudioAnalyzer()
         self.cameras = list_cameras()
@@ -1580,7 +1587,7 @@ class App:
         f.target = 0 if f.needs_mask else e.get("target", 0)
         f.tw = target_weights(f.target)   # a look arrives with its own setting, no glide
         f.keep_out = e.get("keep_out", False)
-        f.autos = {k: dict(a) for k, a in e.get("autos", {}).items()}
+        f.autos = copy_autos(e.get("autos", {}))
         f.listen = e.get("listen") if e.get("listen") in A.SOURCE_KEYS else None
         f.rng = [float(x) for x in e.get("rng", [80.0, 250.0])][:2]
         f.resp = [float(x) for x in e["resp"]][:2] if e.get("resp") else None
@@ -1767,6 +1774,41 @@ class App:
             f.follow = target if tau <= 1e-3 else f.follow + (target - f.follow) * (1 - math.exp(-dt / tau))
         return f.follow * self.gain
 
+    AUDIO_FEELS = {   # one-click starting points for an audio-driven slider: attack, release (s), threshold, curve
+        "Subtle": dict(resp=[0.12, 0.9], gain=1.0, gate=0.0, curve=-0.3),
+        "Punchy": dict(resp=[0.004, 0.16], gain=1.0, gate=0.12, curve=0.35),
+        "Hit": dict(resp=[0.0, 0.07], gain=1.0, gate=0.45, curve=0.8),
+    }
+
+    def audio_drive(self, f, key, a, t):
+        """0..1 for a slider set to follow the sound: its source (a band, a drum, the beat or a frequency range),
+        smoothed by its own attack / release (or the main smoothing), then shaped by Sensitivity, Threshold and
+        Curve. A small Threshold ignores the quiet noise floor; a Curve above 0 lets only the loud parts move it,
+        below 0 lets quiet details move it too."""
+        src = A.SOURCE_KEYS[min(a.get("band", 0), len(A.SOURCE_KEYS) - 1)]
+        target, level = self.audio.source(src, a.get("rng", [80.0, 250.0]))
+        resp = a.get("resp")
+        if resp:
+            st = self.auto_state.setdefault((f.uid, key), [0.0, None])
+            if st[1] != t:   # once a frame, even if it's drawn twice (both looks of a crossfade)
+                dt = 1 / 60 if st[1] is None else min(max(t - st[1], 0.0), 0.1)
+                st[1] = t
+                tau = resp[0] if target > st[0] else resp[1]
+                st[0] = target if tau <= 1e-3 else st[0] + (target - st[0]) * (1 - math.exp(-dt / tau))
+            heard = st[0]
+        else:
+            heard = level
+        w = heard * a.get("gain", 1.0) * self.gain
+        gate = min(0.95, max(0.0, a.get("gate", 0.0)))
+        if gate > 0:
+            w = (w - gate) / (1 - gate)
+        w = min(1.0, max(0.0, w))
+        curve = a.get("curve", 0.0)
+        if curve:
+            w = w ** (2.0 ** (curve * 1.6))
+        self.auto_live[(f.uid, key)] = (min(1.0, heard), w)
+        return w
+
     def automate(self, t):
         tp = self.tempo
         rnd = lambda i, seed: (math.sin(i * 12.9898 + seed * 78.233) * 43758.5453) % 1.0
@@ -1794,8 +1836,7 @@ class App:
                     i, fr = math.floor(cyc), cyc % 1.0
                     w = rnd(i, seed) + (rnd(i + 1, seed) - rnd(i, seed)) * fr * fr * (3 - 2 * fr)
                 else:
-                    keys = A.SOURCE_KEYS[:-1]
-                    w = min(1.0, self.audio.level[keys[min(a.get("band", 0), len(keys) - 1)]] * self.gain)
+                    w = self.audio_drive(f, key, a, t)
                 v = a["lo"] + (a["hi"] - a["lo"]) * w
                 if key == "amt":
                     f.amt = f.amt_smooth = v

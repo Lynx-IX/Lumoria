@@ -2103,16 +2103,82 @@ def group_card(app, g, i, container, show_children=True):
 AUTO_RATES = [(0.1, 30.0, "%.1f s"), (0.25, 64.0, "%.2g beats"), (0.25, 16.0, "%.2g bars")]
 
 
+def audio_map_controls(app, f, key, a, w):
+    """An audio-driven slider: what it listens to, how fast it reacts, and how the sound is shaped into movement."""
+    a.setdefault("rng", [80.0, 250.0])
+    a.setdefault("gain", 1.0)
+    a.setdefault("gate", 0.0)
+    a.setdefault("curve", 0.0)
+    a.setdefault("resp", None)
+    label("Listens to")
+    imgui.set_next_item_width(w)
+    _, a["band"] = imgui.combo("##aband", min(a.get("band", 0), len(A.SOURCES) - 1), [n for _k, n in A.SOURCES])
+    if imgui.is_item_hovered():
+        imgui.set_tooltip("Bass / Mids / Highs / All: how loud that part of the sound is" + chr(10) +
+                          "Kick / Snare / Hats / Big kicks: a pulse on each drum hit" + chr(10) +
+                          "Beat: every beat of the tempo clock" + chr(10) +
+                          "Frequency range: just the part of the sound you pick")
+    if A.SOURCE_KEYS[min(a["band"], len(A.SOURCES) - 1)] == "range":
+        range_controls(app, a["rng"])
+    label("Feel")
+    bw = (w - 12) / 3
+    for i, name in enumerate(app.AUDIO_FEELS):
+        if i:
+            imgui.same_line(0, 6)
+        if neon_button(f"{name}##feel{i}", DIM, V(bw, 0),
+                       tip={"Subtle": "Slow swell: it rises gently and settles back slowly",
+                            "Punchy": "Quick and snappy, ignoring the quiet noise floor",
+                            "Hit": "Only the loud hits move it, then it drops away fast"}[name]):
+            for k, v in app.AUDIO_FEELS[name].items():
+                a[k] = list(v) if isinstance(v, list) else v
+    label("Response")
+    custom = segmented("aresp", ("Main smoothing", "My own"), 1 if a["resp"] else 0, MAGENTA, w)
+    if custom and not a["resp"]:
+        a["resp"] = [0.01, 0.25]
+    elif not custom:
+        a["resp"] = None
+    if a["resp"]:
+        label("Attack")
+        imgui.set_next_item_width(w)
+        _, ms = slider_float("##aatt", a["resp"][0] * 1000, 0.0, 1000.0, "%.0f ms")
+        a["resp"][0] = ms / 1000
+        label("Release")
+        imgui.set_next_item_width(w)
+        _, ms = slider_float("##arel", a["resp"][1] * 1000, 10.0, 4000.0, "%.0f ms", imgui.SliderFlags_.logarithmic)
+        a["resp"][1] = ms / 1000
+    label("Sensitivity")
+    imgui.set_next_item_width(w)
+    _, a["gain"] = slider_float("##again", a["gain"], 0.2, 4.0, "%.2fx", imgui.SliderFlags_.logarithmic)
+    label("Threshold")
+    imgui.set_next_item_width(w)
+    _, a["gate"] = slider_float("##agate", a["gate"], 0.0, 0.9, "%.2f")
+    if imgui.is_item_hovered():
+        imgui.set_tooltip("Sound below this does nothing: ignores a quiet noise floor, or keeps only the loud parts")
+    label("Curve")
+    imgui.set_next_item_width(w)
+    _, a["curve"] = slider_float("##acurve", a["curve"], -1.0, 1.0, "%.2f")
+    if imgui.is_item_hovered():
+        imgui.set_tooltip("Left: quiet sounds count more (subtle, always moving)" + chr(10) +
+                          "Right: only loud sounds count (dramatic, mostly still)")
+    heard, drive = app.auto_live.get((f.uid, key), (0.0, 0.0))
+    label("Hearing")
+    meter(heard, MAGENTA, width=w, height=5)
+    label("Moving it")
+    meter(drive, CYAN, width=w, height=5)
+
+
 def automation_menu(app, f, key, lo, hi, name):
     """Right-click the slider just drawn: make it move on its own (an LFO timed by the tempo). An automated
     slider shows a wave mark beside it."""
     a = f.autos.get(key)
     if a:
         mn, mx = imgui.get_item_rect_min(), imgui.get_item_rect_max()
+        heard = a["shape"] == 7
         imgui.get_window_draw_list().add_text(V(mn.x - sc(17), mn.y + (mx.y - mn.y - imgui.get_text_line_height()) / 2),
-                                              u32(CYAN), fa.ICON_FA_WAVE_SQUARE)
+                                              u32(MAGENTA if heard else CYAN),
+                                              fa.ICON_FA_MUSIC if heard else fa.ICON_FA_WAVE_SQUARE)
     if imgui.is_item_hovered() and not a:
-        imgui.set_tooltip("Right-click: automate (move on its own)")
+        imgui.set_tooltip("Right-click: make it move on its own, or follow the music")
     if not imgui.begin_popup_context_item(f"auto_{key}"):
         return
     bold(f"Automate: {name}", 15)
@@ -2131,10 +2197,7 @@ def automation_menu(app, f, key, lo, hi, name):
         imgui.set_next_item_width(w)
         _, a["shape"] = imgui.combo("##ashape", a["shape"], app.AUTO_SHAPES)
         if a["shape"] == 7:
-            label("Follows")
-            imgui.set_next_item_width(w)
-            _, a["band"] = imgui.combo("##aband", min(a.get("band", 0), len(A.SOURCES) - 2),
-                                       [n for _k, n in A.SOURCES[:-1]])
+            audio_map_controls(app, f, key, a, w)
         else:
             label("Every")
             imgui.set_next_item_width(w - sc(156))
@@ -2225,6 +2288,24 @@ def effect_body(app, f):
     imgui.spacing()
 
 
+def range_controls(app, rng):
+    """Pick a frequency range on the live spectrum (click or drag), or type it with two Hz sliders."""
+    label("")
+    hz = spectrum_strip(app, rng, 30)
+    if hz is not None:
+        imgui.set_tooltip(f"{hz:.0f} Hz" + chr(10) + "Click or drag to move the nearer end of the range here")
+        if imgui.is_mouse_down(0):
+            end = 0 if abs(math.log(hz / rng[0])) < abs(math.log(hz / rng[1])) else 1
+            rng[end] = float(round(hz))
+    label("Range")
+    w = (imgui.get_content_region_avail().x - 6) / 2
+    imgui.set_next_item_width(w)
+    _, rng[0] = slider_float("##rlo", rng[0], 20.0, 16000.0, "%.0f Hz", imgui.SliderFlags_.logarithmic)
+    imgui.same_line(0, 6)
+    imgui.set_next_item_width(w)
+    _, rng[1] = slider_float("##rhi", rng[1], 20.0, 16000.0, "%.0f Hz", imgui.SliderFlags_.logarithmic)
+
+
 def listen_controls(app, f):
     """What an Audio-driven effect follows, and how quickly it reacts."""
     label("Listens to")
@@ -2239,20 +2320,7 @@ def listen_controls(app, f):
                           "Beat: every beat of the tempo clock\n"
                           "Frequency range: just the part of the sound you pick (e.g. only the vocals)")
     if f.listen == "range":
-        label("")
-        hz = spectrum_strip(app, f.rng, 30)
-        if hz is not None:
-            imgui.set_tooltip(f"{hz:.0f} Hz\nClick or drag to move the nearer end of the range here")
-            if imgui.is_mouse_down(0):
-                end = 0 if abs(math.log(hz / f.rng[0])) < abs(math.log(hz / f.rng[1])) else 1
-                f.rng[end] = float(round(hz))
-        label("Range")
-        w = (imgui.get_content_region_avail().x - 6) / 2
-        imgui.set_next_item_width(w)
-        _, f.rng[0] = slider_float("##rlo", f.rng[0], 20.0, 16000.0, "%.0f Hz", imgui.SliderFlags_.logarithmic)
-        imgui.same_line(0, 6)
-        imgui.set_next_item_width(w)
-        _, f.rng[1] = slider_float("##rhi", f.rng[1], 20.0, 16000.0, "%.0f Hz", imgui.SliderFlags_.logarithmic)
+        range_controls(app, f.rng)
     label("Response")
     custom = segmented("resp", ("Main smoothing", "My own"), 1 if f.resp else 0, MAGENTA)
     if imgui.is_item_hovered():

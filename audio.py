@@ -19,9 +19,13 @@ SPEC_N = 128   # spectrum bands / waveform points handed to the shaders
 # what an effect (or the main "React to") can listen to: key, name
 SOURCES = [("bass", "Bass"), ("mid", "Mids"), ("high", "Highs"), ("all", "All"),
            ("kick", "Kick"), ("snare", "Snare / clap"), ("hat", "Hats"), ("accent", "Big kicks"),
-           ("beat", "Beat (tempo clock)"), ("range", "Frequency range")]
+           ("beat", "Beat (tempo clock)"), ("range", "Frequency range"),
+           # slow and stereo measures (after "range", so saved looks keep their numbers)
+           ("energy", "Energy (slow)"), ("bright", "Brightness"), ("busy", "Busyness"),
+           ("pan", "Pan (left to right)"), ("width", "Width (stereo)")]
 SOURCE_KEYS = [k for k, _ in SOURCES]
 SOURCE_NAMES = dict(SOURCES)
+SLOW = ("energy", "bright", "busy", "pan", "width")   # smooth measures of the whole sound, not drum hits
 HITS = ("kick", "snare", "hat", "accent", "beat")   # hit-style sources: a pulse on each hit, not a level
 HOLD = 0.05      # seconds a hit's target stays at 1
 FADE = 0.22      # seconds for a hit's meter-style level to fade (time constant)
@@ -83,9 +87,12 @@ class AudioAnalyzer:
         self._raw = {k: 0.0 for k in BANDS}
         self._lock = threading.Lock()
         keys = (*BANDS, "all")
-        self.level = {k: 0.0 for k in (*keys, *HITS)}
+        self.level = {k: 0.0 for k in (*keys, *HITS, *SLOW)}
+        self.level["pan"] = 0.5
         self.target = dict(self.level)
-        self._range = {k: [1.0, 0.0] for k in keys}
+        self._range = {k: [1.0, 0.0] for k in (*keys, "energy", "bright", "busy", "width")}
+        self._feat = dict(bal=0.0, width=0.0, bright=0.0, busy=0.0)   # from the audio thread, already smoothed
+        self._energy = 0.0
         # for visualizers: log-spaced spectrum (0..1) and the latest stretch of waveform (-1..1)
         self._spec_raw = np.zeros(SPEC_N, np.float32)
         self._wave_raw = np.zeros(SPEC_N, np.float32)
@@ -146,6 +153,10 @@ class AudioAnalyzer:
         onsets = {k: Onset(r) for k, r in REFRACTORY.items()}
         kicks = deque(maxlen=8)   # recent kick strengths, to tell the big ones
         state = dict(prev=None, samples=0, peak=0.0, peak_hops=0)
+        feat = dict(bal=0.0, width=0.0, bright=0.0, busy=0.0)
+        cen = np.flatnonzero((freqs >= 30) & (freqs < 16000))
+        busy_bins = np.flatnonzero((freqs >= 60) & (freqs < 8000))
+        log_lo, log_hi = math.log(150.0), math.log(5000.0)
 
         def callback(indata, frames, _t, _status):
             nonlocal buf
@@ -154,6 +165,16 @@ class AudioAnalyzer:
                 tap(indata.copy())
             mono = indata.mean(axis=1)
             buf = np.concatenate((buf, mono))[-n:]
+            ease = lambda tau: 1.0 - math.exp(-frames / sr / tau)   # how far to move this block toward a new value
+            loud = float(np.sqrt(np.mean(mono * mono)))
+            if loud > 1e-4:   # (below that it's silence: leave the stereo picture and brightness where they were)
+                if indata.shape[1] >= 2:
+                    l, r = indata[:, 0], indata[:, 1]
+                    rl, rr = float(np.sqrt(np.mean(l * l))), float(np.sqrt(np.mean(r * r)))
+                    side = float(np.sqrt(np.mean(((l - r) * 0.5) ** 2)))
+                    mid = float(np.sqrt(np.mean(((l + r) * 0.5) ** 2)))
+                    feat["bal"] += ((rr - rl) / (rr + rl + 1e-9) - feat["bal"]) * ease(0.12)
+                    feat["width"] += (side / (side + mid + 1e-9) - feat["width"]) * ease(0.12)
             mag = np.abs(np.fft.rfft(buf * window)) / (n / 4)
             raw = {}
             for k, m in masks.items():
@@ -170,8 +191,13 @@ class AudioAnalyzer:
             comp = np.log1p(1000.0 * mag)
             prev, state["prev"] = state["prev"], comp
             hits = []
+            if loud > 1e-4:
+                c = float((freqs[cen] * mag[cen]).sum() / (mag[cen].sum() + 1e-9))
+                bright = (math.log(max(c, 1.0)) - log_lo) / (log_hi - log_lo)
+                feat["bright"] += (min(1.0, max(0.0, bright)) - feat["bright"]) * ease(0.3)
             if prev is not None:
                 rise = np.maximum(comp - prev, 0.0)
+                feat["busy"] += (float(rise[busy_bins].mean()) - feat["busy"]) * ease(1.0)
                 flux = {k: float(rise[idx].mean()) if len(idx) else 0.0 for k, idx in det.items()}
                 sens = min(1.0, max(0.0, self.hit_sens))
                 delta = 0.12 + 0.36 * (1.0 - sens)
@@ -198,6 +224,7 @@ class AudioAnalyzer:
             with self._lock:
                 self._raw = raw
                 self._spec_raw, self._wave_raw, self._band_raw = spec, wave, band.astype(np.float32)
+                self._feat = dict(feat)
                 for h in hits:
                     self._hits[h] += 1
 
@@ -228,10 +255,11 @@ class AudioAnalyzer:
         return np.stack([self.spectrum, wave / max(peak, 0.1)]).astype(np.float32)
 
     @staticmethod
-    def _autorange(r, v):
-        """Where v sits between a slow-falling peak and a slow-rising floor (updates r = [floor, peak])."""
-        r[1] = max(v, r[1] * 0.997)   # slow-falling peak
-        r[0] = min(v, r[0] + 0.0008)  # slow-rising floor
+    def _autorange(r, v, slow=False):
+        """Where v sits between a slow-falling peak and a slow-rising floor (updates r = [floor, peak]). The slow
+        measures (energy: builds and drops) use a much longer memory, so a whole section counts as high or low."""
+        r[1] = max(v, r[1] * (0.9995 if slow else 0.997))    # slow-falling peak
+        r[0] = min(v, r[0] + (0.0002 if slow else 0.0008))   # slow-rising floor
         return max(0.0, (v - r[0]) / max(0.08, r[1] - r[0]))
 
     def pulse(self, key, t):
@@ -249,6 +277,7 @@ class AudioAnalyzer:
             raw = dict(self._raw)
             hits, self._hits = self._hits, {k: 0 for k in HITS}
             bands = self._band_raw.copy()
+            feat = dict(self._feat)
         live = self.stream is not None
         for k in HITS:
             self.hit_now[k] = live and hits[k] > 0
@@ -265,6 +294,11 @@ class AudioAnalyzer:
             for r in self._ranges.values():
                 r["level"] *= 0.9
                 r["target"] = 0.0
+            for k in SLOW:
+                rest = 0.5 if k == "pan" else 0.0
+                self.target[k] = rest
+                self.level[k] += (rest - self.level[k]) * 0.1
+            self._energy *= 0.98
             return
         raw["all"] = sum(raw.values()) / 3
         for k, v in raw.items():
@@ -272,6 +306,16 @@ class AudioAnalyzer:
             cur = self.level[k]
             self.target[k] = target
             self.level[k] = cur + (target - cur) * (0.7 if target > cur else 0.15)
+        # slow and stereo measures: smooth, and relative to this music's own range
+        self._energy += (raw["all"] - self._energy) * (1 - math.exp(-dt / 1.5))
+        slow = dict(energy=self._autorange(self._range["energy"], self._energy, slow=True),
+                    bright=self._autorange(self._range["bright"], feat["bright"]),
+                    busy=self._autorange(self._range["busy"], feat["busy"]),
+                    width=self._autorange(self._range["width"], feat["width"]),
+                    pan=0.5 + 0.5 * min(1.0, max(-1.0, feat["bal"] * 2.5)))   # a moderate pan reaches the edges
+        for k, v in slow.items():
+            self.target[k] = v
+            self.level[k] += (v - self.level[k]) * 0.35
         # frequency ranges effects listen to (dropped once nothing has asked for them for a while)
         for key in [k for k, r in self._ranges.items() if now - r["used"] > 5.0]:
             del self._ranges[key]

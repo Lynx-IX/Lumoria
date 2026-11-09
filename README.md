@@ -133,6 +133,10 @@ Right-click any slider on an effect card (Amount, Opacity, Speed and every effec
 *Shape: Audio* to make it follow the music; it shows a music note beside it. The menu has:
 - **Listens to:** Bass / Mids / Highs / All, the drums (Kick, Snare, Hats, Big kicks), the tempo Beat, or a
   **frequency range** you pick on the live spectrum (e.g. only the vocals).
+- **Slow and stereo measures** (for subtle, always-moving influence, alongside the drum hits): *Energy* (slow
+  loudness: builds and drops, relative to the track's own range), *Brightness* (dark to bright sound), *Busyness*
+  (how much is changing), *Pan* (where the sound sits, left to right: 0.5 is the middle) and *Width* (mono to wide
+  stereo). Energy, Brightness, Busyness and Pan are also in the Audio card's *React to* row.
 - **Feel:** one-click starting points: *Subtle* (a slow swell), *Punchy* (quick and snappy), *Hit* (only loud hits,
   then it drops away fast).
 - **Response:** the main smoothing, or your own **attack** and **release** times.

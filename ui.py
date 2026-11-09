@@ -1479,7 +1479,8 @@ def audio_section(app):
                     app.flash(f"Audio failed: {app.audio.error}")
         imgui.end_combo()
     label("React to")
-    for row, keys in enumerate((("bass", "mid", "high", "all"), ("kick", "snare", "hat", "beat"))):
+    for row, keys in enumerate((("bass", "mid", "high", "all"), ("kick", "snare", "hat", "beat"),
+                                ("energy", "bright", "busy", "pan"))):
         if row:
             label("")
         names = [A.SOURCE_NAMES[k].split(" ")[0] for k in keys]
@@ -1491,7 +1492,9 @@ def audio_section(app):
             imgui.set_tooltip("What effects set to Audio follow (each effect can pick its own in its card)\n"
                               "Bass / Mids / Highs / All: how loud that part of the sound is\n"
                               "Kick / Snare / Hats: a pulse on each drum hit\n"
-                              "Beat: a pulse on every beat of the tempo clock, even when the music goes quiet")
+                              "Beat: a pulse on every beat of the tempo clock, even when the music goes quiet" + chr(10) +
+                              "Energy: slow loudness (builds and drops)   Bright: dark to bright sound" + chr(10) +
+                              "Busy: how much is changing   Pan: where the sound sits, left to right")
     label("Sensitivity")
     _, app.gain = slider_float("##gain", app.gain, 0.2, 3.0, "%.2f")
     label("Hit sensitivity")

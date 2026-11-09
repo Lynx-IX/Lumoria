@@ -35,6 +35,7 @@ from imgui_bundle.python_backends.glfw_backend import GlfwRenderer
 
 import effects as E
 import ui
+import audio as A
 from audio import AudioAnalyzer, list_inputs
 from shared import (AUTO_OFF, AUTO_PLAYLIST, AUTO_RANDOM, DATA, FROZEN, HERE, LOOK_MORPH, MOD_AUDIO, MOD_OFF, MOD_WAVE,
                     RESOLUTIONS, TRANSITIONS, VERSION)
@@ -105,6 +106,10 @@ class Effect:
         self.autos = {}              # automation: setting key ("amt", "p2"...) -> its LFO (see App.automate)
         self.morph = None            # (from, to, start time, seconds) while a Morph transition slides it
         self.mod = MOD_AUDIO if spec.get("react") else MOD_OFF
+        # what an Audio-driven effect follows: None = the main "React to" setting, else an audio.SOURCES key;
+        # rng = its frequency range (Hz) for "range"; resp = None (the main smoothing) or [attack, release] in s
+        self.listen, self.rng, self.resp = None, [80.0, 250.0], None
+        self.follow, self.follow_t = 0.0, None   # its own smoothed level, when resp is set
         self.live = 0.0
         self.mix = 0.0               # 0..1 fade position, eases toward on/off
         self.opacity = 1.0           # how much of the effect shows over its input
@@ -181,6 +186,7 @@ class Effect:
         self.colours = [list(c) for c in f.colours]
         self.target, self.tw, self.expanded, self.keep_out = f.target, list(f.tw), f.expanded, f.keep_out
         self.autos = {k: dict(a) for k, a in f.autos.items()}
+        self.listen, self.rng, self.resp = f.listen, list(f.rng), list(f.resp) if f.resp else None
 
     def apply_uniforms(self, prog, size, dt, level, beat):
         set_u(prog, "u_res", size)
@@ -198,6 +204,7 @@ class Effect:
         set_u(prog, "u_cols", cols + [cols[-1]] * (E.MAX_COLOURS - len(cols)))   # the array is always full
         set_u(prog, "u_ncols", len(cols))
         set_u(prog, "u_bands", beat["bands"])
+        set_u(prog, "u_hits", beat["hits"])
         set_u(prog, "u_beats", beat["count"])
         set_u(prog, "u_since", beat["since"])
         set_u(prog, "u_beatlen", beat["len"])
@@ -338,7 +345,8 @@ class Pipeline:
         # audio for the shaders: a 128 x 2 float texture (row 0 spectrum, row 1 waveform) on unit 9, and
         # beat timing (bass, mid, high levels; beats counted; seconds since the last; seconds per beat)
         self.audio_tex = ctx.texture((128, 2), 1, dtype="f4")
-        self.beat = dict(bands=(0.0, 0.0, 0.0), count=0.0, since=10.0, len=0.5)
+        self.beat = dict(bands=(0.0, 0.0, 0.0), hits=(0.0, 0.0, 0.0, 0.0), count=0.0, since=10.0, len=0.5)
+        self.level_of = None   # (effect, t) -> its audio level, for effects that listen to their own source
         self.transition, self.trans_time, self.wave_rate = 0, 1.0, 0.25
         self.trans_unit, self.trans_secs = 0, 1.0   # trans_time is in seconds / beats / bars; trans_secs = seconds
         self.override = None   # (style, seconds, until time) while a look with its own transition fades in
@@ -776,8 +784,9 @@ class Pipeline:
                 vao.render(vertices=3)
                 inp, pi = ping[pi].tex, pi ^ 1
                 continue
+            lv = self.level_of(f, t) if self.level_of and f.mod == MOD_AUDIO else level
             if f.mod == MOD_AUDIO:
-                k = min(1.6, 0.1 + level * 1.2)
+                k = min(1.6, 0.1 + lv * 1.2)
             elif f.mod == MOD_WAVE:  # phase offset per slot so waves don't all move together
                 k = 0.1 + 0.9 * (0.5 + 0.5 * np.sin(2 * np.pi * self.wave_rate * t + idx * 1.7))
             else:
@@ -793,13 +802,13 @@ class Pipeline:
                     for j, pair in enumerate(f.state):
                         pair[new if j < s else f.parity].tex.use(4 + j)
                     f.state[s][new].fbo.use()
-                    f.apply_uniforms(sprog, (W, H), dt, level, self.beat)
+                    f.apply_uniforms(sprog, (W, H), dt, lv, self.beat)
                     svao.render(vertices=3)
                 f.parity = new
                 for j, pair in enumerate(f.state):
                     pair[f.parity].tex.use(4 + j)
             ping[pi].fbo.use()
-            f.apply_uniforms(f.prog, (W, H), dt, level, self.beat)
+            f.apply_uniforms(f.prog, (W, H), dt, lv, self.beat)
             set_u(f.prog, "u_masp", tuple(self.media_asp))
             set_u(f.prog, "u_mlive", tuple(self.media_live))
             set_u(f.prog, "u_plate_on", 1.0 if self.plate else 0.0)
@@ -956,6 +965,7 @@ class VirtualCam:
 class App:
     def __init__(self, ctx, out_win):
         self.pipe = Pipeline(ctx)
+        self.pipe.level_of = self.effect_level
         self.out_win = out_win
         self.audio = AudioAnalyzer()
         self.cameras = list_cameras()
@@ -1530,7 +1540,8 @@ class App:
                         children=[self.item_to_dict(c) for c in f.children if not c.removing])
         return dict(id=f.id, on=f.on, amt=f.amt, mod=f.mod, opacity=f.opacity, blend=f.blend,
                     centre=f.centre, opts=f.opts, params=f.pvals, speed=f.speed,
-                    target=f.target, expanded=f.expanded, colours=f.colours, keep_out=f.keep_out, autos=f.autos)
+                    target=f.target, expanded=f.expanded, colours=f.colours, keep_out=f.keep_out, autos=f.autos,
+                    listen=f.listen, rng=f.rng, resp=f.resp)
 
     def item_from_dict(self, e, by_id, used):
         """Build a chain item from a look; effects are reused objects (one of each exists)."""
@@ -1570,6 +1581,9 @@ class App:
         f.tw = target_weights(f.target)   # a look arrives with its own setting, no glide
         f.keep_out = e.get("keep_out", False)
         f.autos = {k: dict(a) for k, a in e.get("autos", {}).items()}
+        f.listen = e.get("listen") if e.get("listen") in A.SOURCE_KEYS else None
+        f.rng = [float(x) for x in e.get("rng", [80.0, 250.0])][:2]
+        f.resp = [float(x) for x in e["resp"]][:2] if e.get("resp") else None
         return f
 
     # --- auto-play
@@ -1739,6 +1753,20 @@ class App:
     # --- automation: any effect setting can move on its own, like an LFO, timed by the tempo clock
     AUTO_SHAPES = ["Sine", "Triangle", "Ramp up", "Ramp down", "Square", "Random steps", "Smooth random", "Audio"]
 
+    def effect_level(self, f, t):
+        """The audio level an Audio-driven effect follows: its own source (or the main React to), smoothed by
+        the main meter smoothing or its own attack / release."""
+        key = f.listen or self.band
+        target, level = self.audio.source(key, f.rng)
+        if not f.resp:
+            return level * self.gain
+        if f.follow_t != t:   # once a frame, even if it's drawn twice (in both looks of a crossfade)
+            dt = 1 / 60 if f.follow_t is None else min(max(t - f.follow_t, 0.0), 0.1)
+            f.follow_t = t
+            tau = f.resp[0] if target > f.follow else f.resp[1]
+            f.follow = target if tau <= 1e-3 else f.follow + (target - f.follow) * (1 - math.exp(-dt / tau))
+        return f.follow * self.gain
+
     def automate(self, t):
         tp = self.tempo
         rnd = lambda i, seed: (math.sin(i * 12.9898 + seed * 78.233) * 43758.5453) % 1.0
@@ -1766,7 +1794,8 @@ class App:
                     i, fr = math.floor(cyc), cyc % 1.0
                     w = rnd(i, seed) + (rnd(i + 1, seed) - rnd(i, seed)) * fr * fr * (3 - 2 * fr)
                 else:
-                    w = min(1.0, self.audio.level[("bass", "mid", "high")[a.get("band", 0)]] * self.gain)
+                    keys = A.SOURCE_KEYS[:-1]
+                    w = min(1.0, self.audio.level[keys[min(a.get("band", 0), len(keys) - 1)]] * self.gain)
                 v = a["lo"] + (a["hi"] - a["lo"]) * w
                 if key == "amt":
                     f.amt = f.amt_smooth = v
@@ -1819,7 +1848,8 @@ class App:
     # --- session: the current setup is saved continuously and restored on the next launch
     def session_data(self):
         p = self.pipe
-        return dict(version=2, band=self.band, gain=self.gain, current=self.current_preset,
+        return dict(version=2, band=self.band, gain=self.gain, hit_sens=self.audio.hit_sens,
+                    current=self.current_preset,
                     audio_input=self.audio.device_name if self.audio.stream else None,
                     transition=p.transition, trans_time=p.trans_time, trans_unit=p.trans_unit, wave_rate=p.wave_rate,
                     tempo=dict(bpm=round(self.tempo.bpm, 2), source=self.tempo.source,
@@ -1859,6 +1889,7 @@ class App:
         p.transition = data.get("transition", p.transition)
         p.trans_time, p.wave_rate = data.get("trans_time", p.trans_time), data.get("wave_rate", p.wave_rate)
         p.trans_unit = data.get("trans_unit", p.trans_unit)
+        self.audio.hit_sens = float(data.get("hit_sens", self.audio.hit_sens))
         tm = data.get("tempo", {})
         self.tempo.bpm = tm.get("bpm", self.tempo.bpm)
         self.tempo.source = tm.get("source", self.tempo.source)
@@ -2039,16 +2070,24 @@ class App:
 
         dt = 0.0 if self.last_t is None else min(t - self.last_t, 0.1)
         self.last_t = t
-        self.audio.update()
-        level = self.audio.level[self.band] * self.gain
+        au = self.audio
+        au.update(t)
+        if self.band not in au.level:
+            self.band = "bass"
 
-        # simple beat detector on the bass, with hysteresis so one hit counts once
-        beat = False
-        bass = self.audio.level["bass"] if self.audio.stream else 0.0
+        # the tempo follows the kick drum; music with no kick for a while falls back to bass swells
+        # (a simple detector with hysteresis, so one swell counts once)
+        beat = au.hit_now["kick"]
+        bass = au.level["bass"] if au.stream else 0.0
+        swell = False
         if self.beat_armed and bass > 0.65:
-            beat, self.beat_armed, self.beat_until = True, False, t + 0.12
+            swell, self.beat_armed = True, False
         elif bass < 0.35:
             self.beat_armed = True
+        if swell and t - au.last_kick > 4.0:
+            beat = True
+        if beat:
+            self.beat_until = t + 0.12
         # the beat clock: follows the bass hits (Audio), taps, a set BPM or MIDI clock; shaders and auto-play
         # count its beats, so they keep steady time even when the music goes quiet
         tp = self.tempo
@@ -2058,6 +2097,8 @@ class App:
         beat = tp.beat_now
         if beat:
             self.beat_until = t + 0.12
+            au.pulse("beat", t)
+        level = au.level[self.band] * self.gain
         b = self.pipe.beat
         b["count"], b["since"], b["len"] = float(int(tp.phase)), (tp.phase % 1.0) * tp.beat_len, tp.beat_len
         self.pipe.trans_secs = tp.seconds(self.pipe.trans_time, self.pipe.trans_unit)
@@ -2066,6 +2107,7 @@ class App:
             self.load_preset(name, now=True)
         lv = self.audio.level
         b["bands"] = (lv["bass"] * self.gain, lv["mid"] * self.gain, lv["high"] * self.gain)
+        b["hits"] = (lv["kick"], lv["snare"], lv["hat"], lv["accent"])
         self.pipe.audio_tex.write(self.audio.shader_data(t).tobytes())
         if self.auto_mode:
             every, unit = self.hold_time()

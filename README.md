@@ -73,6 +73,11 @@ They live in `samples/`; the welcome (Settings > About > Show the welcome again)
   the arrow opens its settings (amount, opacity, blend mode, centre, speed and its own options), × removes it.
   The ⧉ button (or right-click > *Duplicate*) adds an independent copy ("Neon Edges 2") with the same settings,
   e.g. to run one effect on the subject and a differently set copy on the background. Copies save with looks.
+- **Outline view (the default):** the list button on the Effects tab (or *Interface → Effects view*) turns the cards into a short
+  list of the whole chain in order: power, name, mode, pin and remove on each row, with a thin live amount line.
+  Click a row to open that effect below the list; it closes the one before (Shift-click, or the pin on a row, keeps
+  several open; *Interface → Opening one* can make "keeps others" the default). Drag a row to reorder, right-click
+  for the card menu, number keys still follow the list order. Groups show with their effects indented under them.
 - **Playlist (bottom):** saved looks as tiles. A look is a snapshot of the whole effect chain: build one in the
   sidebar, then press **Save look** (or the **+ Save current look** tile). Click a tile to fire it (with the current
   transition), drag to reorder, right-click to overwrite or delete. Play runs through the playlist (or random looks)

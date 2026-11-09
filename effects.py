@@ -93,6 +93,7 @@ uniform float u_p0, u_p1, u_p2, u_p3, u_p4, u_p5;            // per-effect extra
 uniform vec3 u_cols[8];                     // the effect's own colours, for the "Custom" palette
 uniform int u_ncols;                         // how many of them are in use (2..8)
 uniform vec3 u_bands;                        // bass, mid, high (0..1)
+uniform vec4 u_hits;                         // kick, snare / clap, hats, big kick: 1 on a hit, fading after
 uniform float u_beats, u_since, u_beatlen;   // beats counted so far, seconds since the last one, beat length
 uniform sampler2D u_audiotex;                // row 0: 128-band spectrum (low..high), row 1: waveform
 uniform vec2 u_centre;                       // movable centre for effects with center=True

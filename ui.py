@@ -17,6 +17,7 @@ from imgui_bundle import imgui
 import effects as E
 import recorder
 import tempo
+import audio as A
 from audio import list_inputs
 from segment import QUALITY as SEG_QUALITY
 from shared import (AUTO_OFF, AUTO_PLAYLIST, AUTO_RANDOM, DATA, HERE, LOOK_TRANSITIONS, MOD_AUDIO, MOD_WAVE,
@@ -108,7 +109,7 @@ TOPBAR_H, PLAYLIST_SHUT_H, LABEL_W, GAP = 54, 52, 96, 6   # GAP: draggable seam 
 SETTINGS_FILE = os.path.join(DATA, "ui_settings.json")
 LAYOUT_DEFAULTS = dict(sidebar_w=410.0, playlist_h=196.0, playlist_open=True, scale=1.0, card_cols=0,
                        theme="Console", accent=0, header_tint=False, side_tab=0, welcomed=False,
-                       card_warnings=0, logo_look=0, theme_keys=0)
+                       card_warnings=0, logo_look=0, theme_keys=0, fx_view=1, fx_keep=0)
 CARD_MIN_W = 300   # auto grid: a new column of effect cards appears whenever this much more width fits
 
 
@@ -126,6 +127,10 @@ class _State:
     side_tab = 0                   # sidebar tab: 0 Effects, 1 Settings
     welcomed = False               # the welcome window has been seen (Settings > About shows it again)
     welcome_open = False
+    fx_view = 1                    # Effects tab: 0 cards, 1 outline (the default) (a list, with the open effect(s) below it)
+    fx_keep = 0                    # outline: 0 opening an effect closes the others, 1 keeps them open
+    fx_seen, fx_shift = None, False   # outline: which effects were open last frame; a Shift-click this frame
+    pinned = set()                 # outline: effects (by uid) that stay open when another is opened
     confirm_delete = None          # a look waiting for "Delete it?" to be answered
     show_keys = False              # F1: the keyboard shortcuts sheet
     brand = None                   # (small symbol, large symbol, wordmark) textures from assets/, loaded on first use
@@ -1300,6 +1305,23 @@ def interface_section():
     if imgui.is_item_hovered():
         imgui.set_tooltip("Quick theme switching from the top bar:\n"
                           "a palette button at the right, or the row of theme keys after the readout")
+    label("Effects view")
+    fv = segmented("fxview", ("Cards", "Outline"), S.fx_view, CYAN)
+    if fv != S.fx_view:
+        S.fx_view, S.fx_seen = fv, None
+        save_layout()
+    if imgui.is_item_hovered():
+        imgui.set_tooltip("Cards: every effect is a card in a grid" + chr(10) +
+                          "Outline: a short list of the chain in order; the effect you pick opens below it" + chr(10) +
+                          "(also the list button on the Effects tab)")
+    label("Opening one")
+    fk = segmented("fxkeep", ("Closes others", "Keeps others"), S.fx_keep, CYAN)
+    if fk != S.fx_keep:
+        S.fx_keep = fk
+        save_layout()
+    if imgui.is_item_hovered():
+        imgui.set_tooltip("Outline view: picking an effect closes the one before it. Shift-click, or the pin on a row," + chr(10) +
+                          "keeps several open at once")
     label("Card warnings")
     cw = segmented("cwarn", ("Full", "Icon only", "Off"), S.card_warnings, AMBER)
     if cw != S.card_warnings:
@@ -1456,16 +1478,90 @@ def audio_section(app):
                 if app.audio.error:
                     app.flash(f"Audio failed: {app.audio.error}")
         imgui.end_combo()
-    bands = ("bass", "mid", "high", "all")
     label("React to")
-    app.band = bands[segmented("band", ("Bass", "Mids", "Highs", "All"), bands.index(app.band), MAGENTA)]
+    for row, keys in enumerate((("bass", "mid", "high", "all"), ("kick", "snare", "hat", "beat"))):
+        if row:
+            label("")
+        names = [A.SOURCE_NAMES[k].split(" ")[0] for k in keys]
+        cur = keys.index(app.band) if app.band in keys else -1
+        new = segmented(f"band{row}", names, cur, MAGENTA)
+        if new != cur:
+            app.band = keys[new]
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("What effects set to Audio follow (each effect can pick its own in its card)\n"
+                              "Bass / Mids / Highs / All: how loud that part of the sound is\n"
+                              "Kick / Snare / Hats: a pulse on each drum hit\n"
+                              "Beat: a pulse on every beat of the tempo clock, even when the music goes quiet")
     label("Sensitivity")
     _, app.gain = slider_float("##gain", app.gain, 0.2, 3.0, "%.2f")
+    label("Hit sensitivity")
+    _, app.audio.hit_sens = slider_float("##hitsens", app.audio.hit_sens, 0.0, 1.0, "%.2f")
+    if imgui.is_item_hovered():
+        imgui.set_tooltip("How easily a drum counts as a hit: low = only the clearest hits, high = every little one")
     for b, name in (("bass", "Bass"), ("mid", "Mids"), ("high", "Highs")):
         imgui.text_colored(DIM, name)
         imgui.same_line(sc(LABEL_W))
         imgui.set_cursor_pos_y(imgui.get_cursor_pos_y() + sc(7))
         meter(app.audio.level[b], MAGENTA if b == app.band else alpha(MAGENTA, .45))
+    label("Hits")
+    hit_lights(app)
+    label("Spectrum")
+    spectrum_strip(app)
+
+
+def hit_lights(app):
+    """A row of lamps that flash on each drum hit (and on the tempo clock's beat)."""
+    keys = ("kick", "snare", "hat", "accent", "beat")
+    names = ("Kick", "Snare", "Hats", "Big", "Beat")
+    avail = imgui.get_content_region_avail().x
+    p, h = imgui.get_cursor_screen_pos(), imgui.get_frame_height()
+    dl = imgui.get_window_draw_list()
+    w = (avail - 4 * 4) / len(keys)
+    for i, (k, name) in enumerate(zip(keys, names)):
+        x = p.x + i * (w + 4)
+        v = app.audio.level[k]
+        col = VIOLET if k == "beat" else MAGENTA
+        dl.add_rect_filled(V(x, p.y + 2), V(x + w, p.y + h - 2), u32(FRAME), 3)
+        dl.add_rect_filled(V(x, p.y + 2), V(x + w, p.y + h - 2), u32(alpha(col, .12 + .75 * v)), 3)
+        if k == app.band:
+            dl.add_rect(V(x, p.y + 2), V(x + w, p.y + h - 2), u32(col), 3)
+        ts = imgui.calc_text_size(name)
+        dl.add_text(V(x + (w - ts.x) / 2, p.y + (h - ts.y) / 2), u32(TEXT if v > .4 else DIM), name)
+    imgui.dummy(V(avail, h))
+
+
+def spectrum_strip(app, rng=None, height=34.0):
+    """The live spectrum, low to high, as thin bars; rng (Hz) shades the part an effect listens to.
+    Returns the frequency (Hz) under the mouse, or None."""
+    au = app.audio
+    spec = au.spectrum if au.stream else np.zeros(A.SPEC_N, np.float32)
+    avail = imgui.get_content_region_avail().x
+    hh = sc(height)
+    p = imgui.get_cursor_screen_pos()
+    dl = imgui.get_window_draw_list()
+    dl.add_rect_filled(p, V(p.x + avail, p.y + hh), u32(FRAME), 3)
+    lo_hz, hi_hz = math.log(30), math.log(16000)
+
+    def x_of(hz):
+        return p.x + 2 + (avail - 4) * (math.log(max(30.0, min(16000.0, hz))) - lo_hz) / (hi_hz - lo_hz)
+    if rng:
+        dl.add_rect_filled(V(x_of(min(rng)), p.y), V(x_of(max(rng)), p.y + hh), u32(alpha(MAGENTA, .18)), 2)
+    n = len(spec)
+    bw = (avail - 4) / n
+    for i, v in enumerate(spec):
+        hz = au.band_hz[i]
+        inside = rng is None or min(rng) <= hz <= max(rng)
+        x = p.x + 2 + i * bw
+        top = p.y + hh - 2 - (hh - 4) * float(v)
+        dl.add_rect_filled(V(x, top), V(x + max(1.0, bw - 1), p.y + hh - 2),
+                           u32(MAGENTA if inside else alpha(MAGENTA, .35)))
+    for hz, txt in ((100, "100"), (1000, "1k"), (10000, "10k")):
+        dl.add_text(V(x_of(hz) + 2, p.y + 1), u32(alpha(DIM, .7)), txt)
+    imgui.invisible_button("##spec", V(avail, hh))
+    if imgui.is_item_hovered():
+        mx = imgui.get_mouse_pos().x
+        return math.exp(lo_hz + (hi_hz - lo_hz) * min(1.0, max(0.0, (mx - p.x - 2) / max(avail - 4, 1))))
+    return None
 
 
 def is_group(f):
@@ -1483,8 +1579,15 @@ def effects_section(app):
     gap = 6
     w_small = sc(40)
     avail = imgui.get_content_region_avail().x
-    if neon_button(f"{fa.ICON_FA_PLUS}   Add effect", CYAN, V(avail - 6 * (w_small + gap), 0)):
+    if neon_button(f"{fa.ICON_FA_PLUS}   Add effect", CYAN, V(avail - 7 * (w_small + gap), 0)):
         S.lib_target, S.open_lib = None, True
+    imgui.same_line(0, gap)
+    if neon_button(f"{fa.ICON_FA_LIST if S.fx_view == 0 else fa.ICON_FA_TABLE_CELLS_LARGE}##view", CYAN,
+                   V(w_small, 0), active=S.fx_view == 1,
+                   tip="Outline view: every effect in order as a short list, and the one you pick opens below it"
+                       if S.fx_view == 0 else "Back to cards"):
+        S.fx_view, S.fx_seen = 1 - S.fx_view, None
+        save_layout()
     imgui.same_line(0, gap)
     if neon_button(f"{fa.ICON_FA_FOLDER_PLUS}##grp", VIOLET, V(w_small, 0),
                    tip="New group: a layer with its own effects, blended back as one\n"
@@ -1495,6 +1598,7 @@ def effects_section(app):
     any_open = any(f.expanded for f in everything)
     if neon_button(f"{fa.ICON_FA_ANGLES_UP if any_open else fa.ICON_FA_ANGLES_DOWN}##fold", CYAN, V(w_small, 0),
                    tip="Collapse all cards" if any_open else "Expand all cards"):
+        S.fx_shift = True   # outline: opening them all together is on purpose
         for f in everything:
             f.expanded = not any_open
     imgui.same_line(0, gap)
@@ -1521,7 +1625,137 @@ def effects_section(app):
         imgui.text_colored(DIM, "No effects yet. Add one, or fire a look\nfrom the playlist below.")
         return
     imgui.spacing()
-    draw_items(app, app.pipe.order, top=True)
+    if S.fx_view == 1:
+        outline_view(app)
+    else:
+        draw_items(app, app.pipe.order, top=True)
+
+
+def outline_flat(items, depth=0, top=True):
+    """(item, its chain list, key number or None, indent) for each effect and group in order, a group followed by
+    the effects inside it."""
+    for i, f in enumerate([f for f in items if not f.removing]):
+        yield f, items, (i if top else None), depth
+        if is_group(f):
+            yield from outline_flat(f.children, depth + 1, False)
+
+
+def outline_focus(flat):
+    """One at a time: an effect that has just been opened (a click, Add effect, a fired look) closes the others,
+    unless it was Shift-clicked, the others are pinned, or Settings > Interface keeps them open."""
+    now = {f.uid for f, *_ in flat if f.expanded}
+    if S.fx_seen is not None:
+        new = [f for f, *_ in flat if f.expanded and f.uid not in S.fx_seen]
+        if new and not (S.fx_keep or S.fx_shift):
+            keep = {new[0].uid}   # a look that opened several at once: show the first
+            for f, *_ in flat:
+                if f.expanded and f.uid not in keep and f.uid not in S.pinned:
+                    f.expanded = False
+            now = {f.uid for f, *_ in flat if f.expanded}
+    S.fx_seen, S.fx_shift = now, False
+
+
+def outline_row(app, f, key, container, depth):
+    """One line of the outline: grip, power, name (click to open), mode, pin, remove."""
+    imgui.push_id(f.id)
+    group = is_group(f)
+    accent = VIOLET if group else (MOD_COLS[f.mod] if f.mod else CYAN)
+    pinned = f.uid in S.pinned
+    h = sc(28)
+    imgui.push_style_var(imgui.StyleVar_.item_spacing, V(2, 2))
+    if depth:
+        imgui.dummy(V(sc(14) * depth, 1))
+        imgui.same_line(0, 0)
+    icon_button(fa.ICON_FA_GRIP_VERTICAL, "grip", alpha(DIM, .7), size=V(sc(16), 0))
+    if imgui.is_item_hovered():
+        imgui.set_mouse_cursor(imgui.MouseCursor_.resize_all)
+    card_drag_source(f)
+    imgui.same_line()
+    if power_button(f.on, accent, "Group on/off (fades)" if group else "Bypass on/off (fades)") \
+            and not app.midi_learn:
+        f.on = not f.on
+    imgui.same_line()
+    right_w = sc(28) * (2 if group else 3) + 6
+    name_w = imgui.get_content_region_avail().x - right_w
+    imgui.push_style_color(imgui.Col_.header, alpha(accent, .16))
+    imgui.push_style_color(imgui.Col_.header_hovered, alpha(accent, .24))
+    imgui.push_style_color(imgui.Col_.header_active, alpha(accent, .32))
+    if imgui.selectable("##row", f.expanded, imgui.SelectableFlags_.allow_overlap, V(name_w, h))[0]:
+        f.expanded = not f.expanded
+        S.fx_shift = imgui.get_io().key_shift   # Shift keeps the others open
+    imgui.pop_style_color(3)
+    card_menu(app, f, container)
+    card_drop_target(container, container.index(f))   # drop a row here to put it before this one
+    mn = imgui.get_item_rect_min()
+    dl = imgui.get_window_draw_list()
+    ty = mn.y + (h - imgui.get_text_line_height()) / 2
+    if key is not None and key < 10:
+        dl.add_text(S.mono, 16 * S.scale, V(mn.x + 4, ty), u32(alpha(DIM, .8)), f"{(key + 1) % 10}")
+    imgui.push_font(S.bold if f.on else S.font, 16)
+    label_text = f"{fa.ICON_FA_FOLDER_OPEN if f.expanded else fa.ICON_FA_FOLDER}  {f.name}" if group else f.name
+    dl.add_text(V(mn.x + sc(22), ty - 1), u32((TEXT if group else NAME_ON) if f.on else DIM), label_text)
+    tw = imgui.calc_text_size(label_text).x
+    imgui.pop_font()
+    if group:
+        n = sum(1 for c in f.children if not c.removing)
+        dl.add_text(V(mn.x + sc(22) + tw + sc(10), ty), u32(DIM), f"{n} effect{'s' if n != 1 else ''}")
+    else:   # a thin live amount strip along the bottom of the row
+        frac = f.live / 1.6 if f.mod else f.live * f.mix
+        w_full = name_w - 8
+        dl.add_rect_filled(V(mn.x + 4, mn.y + h - 3), V(mn.x + 4 + w_full, mn.y + h - 2), u32(SEG_OFF))
+        dl.add_rect_filled(V(mn.x + 4, mn.y + h - 3), V(mn.x + 4 + w_full * min(1.0, max(0.0, frac)), mn.y + h - 2),
+                           u32(accent if f.on else alpha(DIM, .4)))
+        if S.card_warnings != 2 and f.on and not f.removing and app.covered_by(f, container) is not None:
+            dl.add_text(V(mn.x + name_w - sc(22), ty), u32(AMBER), fa.ICON_FA_EYE_SLASH)
+            if imgui.is_item_hovered() and imgui.get_io().mouse_pos.x > mn.x + name_w - sc(26):
+                imgui.set_tooltip("Mostly hidden by a later effect: open it for details")
+    imgui.same_line()
+    if not group:
+        if icon_button(MOD_ICONS[f.mod], "mod", MOD_COLS[f.mod], MOD_TIPS[f.mod] + "\n(click to cycle)"):
+            f.mod = (f.mod + 1) % 3
+        imgui.same_line()
+    if icon_button(fa.ICON_FA_THUMBTACK, "pin", AMBER if pinned else alpha(DIM, .45),
+                   "Pinned: stays open while you open others (click to unpin)" if pinned
+                   else "Pin: keep this open while you open other effects"):
+        if pinned:
+            S.pinned.discard(f.uid)
+        else:
+            S.pinned.add(f.uid)
+            f.expanded = True
+            S.fx_shift = True
+    imgui.same_line()
+    if icon_button(fa.ICON_FA_XMARK, "rm", DIM, "Remove from chain", hover_col=RED):
+        app.remove_effect(f)
+    imgui.pop_style_var()
+    imgui.pop_id()
+
+
+def outline_view(app):
+    """The Effects tab as a list: every effect in chain order, then the card of each open one below."""
+    flat = list(outline_flat(app.pipe.order))
+    outline_focus(flat)
+    imgui.push_style_color(imgui.Col_.child_bg, CARD)
+    imgui.push_style_color(imgui.Col_.border, BORDER)
+    imgui.push_style_var(imgui.StyleVar_.window_padding, V(6, 4))
+    imgui.begin_child("outline", V(-1, 0),
+                      imgui.ChildFlags_.borders | imgui.ChildFlags_.auto_resize_y
+                      | imgui.ChildFlags_.always_use_window_padding, imgui.WindowFlags_.no_scrollbar)
+    imgui.pop_style_var()
+    imgui.pop_style_color(2)
+    for f, container, key, depth in flat:
+        outline_row(app, f, key, container, depth)
+    imgui.dummy(V(-1, sc(8)))
+    card_drop_target(app.pipe.order, None)   # drop here to send an effect to the end of the chain
+    imgui.end_child()
+    bevel(imgui.get_item_rect_min(), imgui.get_item_rect_max())
+    opened = [(f, container, key) for f, container, key, _ in flat if f.expanded]
+    if opened:
+        imgui.spacing()
+    for f, container, key in opened:
+        if is_group(f):
+            group_card(app, f, key, container, show_children=False)
+        else:
+            effect_card(app, f, key, container)
 
 
 def draw_items(app, items, top):
@@ -1749,7 +1983,7 @@ def cover_notes(app, f, container):
     imgui.pop_text_wrap_pos()
 
 
-def group_card(app, g, i, container):
+def group_card(app, g, i, container, show_children=True):
     """A layer: header like an effect card; body has its blend settings and its own effect cards."""
     imgui.push_id(g.id)
     imgui.push_style_color(imgui.Col_.child_bg, GROUP_BG)   # a sub-panel: darker than its modules
@@ -1855,9 +2089,11 @@ def group_card(app, g, i, container):
         if not n:
             imgui.text_colored(DIM, "Empty: add effects here, drag cards onto this group,\n"
                                     "or right-click a card > Move into group.")
-        else:
+        elif show_children:
             imgui.spacing()
             draw_items(app, g.children, top=False)
+        else:
+            imgui.text_colored(DIM, "Its effects are in the list above, under the group.")
     imgui.end_child()
     card_drop_target(g.children, None)   # dropping on the group puts the card inside, at the end
     bevel(imgui.get_item_rect_min(), imgui.get_item_rect_max())
@@ -1896,7 +2132,9 @@ def automation_menu(app, f, key, lo, hi, name):
         _, a["shape"] = imgui.combo("##ashape", a["shape"], app.AUTO_SHAPES)
         if a["shape"] == 7:
             label("Follows")
-            a["band"] = segmented("aband", ("Bass", "Mids", "Highs"), a.get("band", 0), MAGENTA, w)
+            imgui.set_next_item_width(w)
+            _, a["band"] = imgui.combo("##aband", min(a.get("band", 0), len(A.SOURCES) - 2),
+                                       [n for _k, n in A.SOURCES[:-1]])
         else:
             label("Every")
             imgui.set_next_item_width(w - sc(156))
@@ -1922,6 +2160,8 @@ def effect_body(app, f):
     label(f.amt_label or "Amount")
     _, f.amt = slider_float("##amt", f.amt, 0.0, 1.0, "%.2f")
     automation_menu(app, f, "amt", 0.0, 1.0, f.amt_label or "Amount")
+    if f.mod == MOD_AUDIO:
+        listen_controls(app, f)
     label("Opacity")
     imgui.set_next_item_width(imgui.get_content_region_avail().x - 118)
     _, pct = slider_float("##opacity", f.opacity * 100, 0.0, 100.0, "%.0f%%")
@@ -1983,6 +2223,51 @@ def effect_body(app, f):
         if choices[f.opts[j]] == "Custom":   # the effect's own colours
             custom_colours(f, j)
     imgui.spacing()
+
+
+def listen_controls(app, f):
+    """What an Audio-driven effect follows, and how quickly it reacts."""
+    label("Listens to")
+    names = [f"Main setting ({A.SOURCE_NAMES[app.band]})"] + [n for _k, n in A.SOURCES]
+    cur = 0 if f.listen is None else A.SOURCE_KEYS.index(f.listen) + 1
+    changed, cur = imgui.combo("##listen", cur, names)
+    if changed:
+        f.listen = None if cur == 0 else A.SOURCE_KEYS[cur - 1]
+    if imgui.is_item_hovered():
+        imgui.set_tooltip("Main setting: whatever React to (Audio card) is set to\n"
+                          "Kick / Snare / Hats / Big kicks: a pulse on each hit\n"
+                          "Beat: every beat of the tempo clock\n"
+                          "Frequency range: just the part of the sound you pick (e.g. only the vocals)")
+    if f.listen == "range":
+        label("")
+        hz = spectrum_strip(app, f.rng, 30)
+        if hz is not None:
+            imgui.set_tooltip(f"{hz:.0f} Hz\nClick or drag to move the nearer end of the range here")
+            if imgui.is_mouse_down(0):
+                end = 0 if abs(math.log(hz / f.rng[0])) < abs(math.log(hz / f.rng[1])) else 1
+                f.rng[end] = float(round(hz))
+        label("Range")
+        w = (imgui.get_content_region_avail().x - 6) / 2
+        imgui.set_next_item_width(w)
+        _, f.rng[0] = slider_float("##rlo", f.rng[0], 20.0, 16000.0, "%.0f Hz", imgui.SliderFlags_.logarithmic)
+        imgui.same_line(0, 6)
+        imgui.set_next_item_width(w)
+        _, f.rng[1] = slider_float("##rhi", f.rng[1], 20.0, 16000.0, "%.0f Hz", imgui.SliderFlags_.logarithmic)
+    label("Response")
+    custom = segmented("resp", ("Main smoothing", "My own"), 1 if f.resp else 0, MAGENTA)
+    if imgui.is_item_hovered():
+        imgui.set_tooltip("How quickly it rises with the sound (attack) and falls back (release)")
+    if custom and not f.resp:
+        f.resp, f.follow = [0.01, 0.25], 0.0
+    elif not custom:
+        f.resp = None
+    if f.resp:
+        label("Attack")
+        _, ms = slider_float("##att", f.resp[0] * 1000, 0.0, 1000.0, "%.0f ms")
+        f.resp[0] = ms / 1000
+        label("Release")
+        _, ms = slider_float("##rel", f.resp[1] * 1000, 10.0, 4000.0, "%.0f ms", imgui.SliderFlags_.logarithmic)
+        f.resp[1] = ms / 1000
 
 
 def custom_colours(f, j):

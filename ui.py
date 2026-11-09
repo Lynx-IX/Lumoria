@@ -2347,6 +2347,7 @@ def effect_body(app, f):
         f.target = segmented("target", ("All", "Subject", "Background"), f.target, MAGENTA)
         if imgui.is_item_hovered():
             imgui.set_tooltip("Use AI background removal to limit this effect to you, or to everything behind you")
+    affects_controls(app, f)
     if f.keep_out or (f in app.pipe.order and any(
             t.kind == "trails" and t.opts[0] == 1 and t.on and not t.removing for t in walk_items(app.pipe.order)
             if not is_group(t))):
@@ -2427,6 +2428,51 @@ def range_controls(app, rng):
     imgui.same_line(0, 6)
     imgui.set_next_item_width(w)
     _, rng[1] = slider_float("##rhi", rng[1], 20.0, 16000.0, "%.0f Hz", imgui.SliderFlags_.logarithmic)
+
+
+def affects_controls(app, f):
+    """Affects: Everything (the picture as it is at this point) or Chosen (only what the effects you tick above it
+    contributed, so a warp can hit an overlay and leave the video alone). Also tells a chosen effect who picked it."""
+    cont = app.pipe.container_of(f)
+    if cont is None or f not in cont:
+        return
+    i = cont.index(f)
+    above = [x for x in cont[:i] if not x.removing]
+    key_of = app.pipe.item_key
+    mine = key_of(f)
+    pickers = [x for x in cont[i + 1:] if not is_group(x) and x.pick and x.on and not x.removing and mine in x.chosen]
+    if pickers:
+        label("Feeds into")
+        imgui.text_colored(MAGENTA, ", ".join(x.name for x in pickers))
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("What this effect adds to the picture goes through that effect's Chosen setting first")
+    label("Affects")
+    c = segmented("pick", ("Everything", "Chosen"), int(f.pick), CYAN)
+    if bool(c) != f.pick:
+        f.pick = bool(c)
+    if imgui.is_item_hovered():
+        imgui.set_tooltip("Everything: the picture as it is at this point in the chain" + chr(10) +
+                          "Chosen: only what the effects you tick below contributed, so it can work on an overlay" +
+                          chr(10) + "and leave the video itself alone")
+    if not f.pick:
+        return
+    if not above:
+        label("")
+        imgui.text_colored(DIM, "Nothing above it yet. Put it below the effects you want it to work on.")
+        return
+    for x in above:
+        k = key_of(x)
+        label("")
+        ticked = k in f.chosen
+        changed, v = imgui.checkbox(f"{x.name}##pk{k}", ticked)
+        if changed:
+            if v and k not in f.chosen:
+                f.chosen.append(k)
+            elif not v and k in f.chosen:
+                f.chosen.remove(k)
+    if not any(key_of(x) in f.chosen for x in above):
+        label("")
+        imgui.text_colored(DIM, "Tick what it should work on. Until then it does nothing.")
 
 
 def music_controls(app, f):

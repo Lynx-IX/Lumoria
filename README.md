@@ -152,6 +152,7 @@ the bass. Settings are saved with looks. *Hit sensitivity* (Audio card) sets how
 Effects that follow the sound have a **Music** setting: *Reactive* (follows it as it happens), *Swell* (breathes with how loud it has
 been), *Flow* (drifts on a clock that speeds up with the music) or *Rhythmic* (moves in time with the beat), plus a *Response* slider for
 how slowly they answer. Aurora Field, Stained Glass and Audio Warp animate their inner structure this way.
+**Affects: Chosen.** Under *Apply to*, any effect can be set to work on only what chosen effects above it contributed. Tick Aurora Field under Audio Warp and the warp bends the aurora while the video stays still. Overlay and audio effects contribute the light they add; other effects contribute their whole change, so it works best with movement effects. The chosen effect feeds into the one that picked it, and its card says so.
 Overlay effects (Light Rays, Light Leaks, Bubbles, Neon Shapes, Audio Visualizer, Aurora Field, Spectrum Terrain, Vectorscope) have shared
 **Scale** and **Rotate** about their Centre; the picture underneath stays put.
 Every wide slider also has a number box beside it for typing an exact value (Settings > Interface > Number boxes).

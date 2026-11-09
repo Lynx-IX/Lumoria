@@ -128,6 +128,8 @@ class Effect:
         self.amt_label = spec.get("amt_label", "")
         # animated effects run on their own clock so Speed can slow, freeze or reverse them
         self.has_speed = spec.get("speed", False)
+        self.pick = False            # "Affects: Chosen": works only on what the chosen effects above it contributed
+        self.chosen = []             # their keys (effect id, or "g:" + a group's name)
         self.xform = spec.get("xform", False)   # shared Scale / Rotate about the Centre (see effects.xform_code)
         self.xs, self.xr = 1.0, 0.0
         self.music = spec.get("music", False)   # shows the Music character controls even before audio is on
@@ -194,6 +196,7 @@ class Effect:
         self.listen, self.rng, self.resp = f.listen, list(f.rng), list(f.resp) if f.resp else None
         self.char, self.mresp = f.char, f.mresp
         self.xs, self.xr = f.xs, f.xr
+        self.pick, self.chosen = f.pick, list(f.chosen)
 
     def char_resp(self):
         """[attack, release] seconds an audio-following setting uses when it has none of its own: set by this
@@ -314,6 +317,22 @@ class Pipeline:
             set_u(self.place_prog, name, unit)
         self.place_vao = ctx.vertex_array(self.place_prog, [])
         set_u(self.place_prog, "u_cut", 12)
+        # "Affects: Chosen": what a chosen effect contributed (its output minus its input, signed) is gathered into
+        # a half-float layer; the effect that picked it works on that layer alone; then the layer is swapped in.
+        self.delta_prog = ctx.program(vertex_shader=E.VERT, fragment_shader=E.HEAD
+                                      + "uniform float u_pos; void main(){ vec3 d = texture(u_tex, v_uv).rgb - texture(u_s0, v_uv).rgb;"
+                                      " o = vec4(u_pos > .5 ? max(d, 0.) : d, 0.); }")
+        self.enc_prog = ctx.program(vertex_shader=E.VERT, fragment_shader=E.HEAD
+                                    + "void main(){ o = vec4(texture(u_tex, v_uv).rgb*.5 + .5, 1.); }")
+        self.comb_prog = ctx.program(vertex_shader=E.VERT, fragment_shader=E.HEAD
+                                     + "uniform sampler2D u_dw; void main(){ o = vec4(clamp(texture(u_tex, v_uv).rgb"
+                                       " - texture(u_s0, v_uv).rgb + (texture(u_dw, v_uv).rgb - .5)*2., 0., 1.), 1.); }")
+        for prog in (self.delta_prog, self.enc_prog, self.comb_prog):
+            for name, unit in (("u_tex", 0), ("u_s0", 4), ("u_dw", 5)):
+                set_u(prog, name, unit)
+        self.delta_vao, self.enc_vao, self.comb_vao = (ctx.vertex_array(p, []) for p in
+                                                       (self.delta_prog, self.enc_prog, self.comb_prog))
+        self.lay = []   # shared scratch layers (encoded input, worked result)
         self.alpha_prog = ctx.program(vertex_shader=E.VERT, fragment_shader=E.HEAD + E.ALPHA_OUT)
         for name, unit in (("u_tex", 0), ("u_mask", 3)):
             set_u(self.alpha_prog, name, unit)
@@ -741,6 +760,61 @@ class Pipeline:
         self.outgoing = dict(order=[f for f in self.order if not f.removing], start=t, dur=seconds, style=style)
         self.order = new_order
 
+    @staticmethod
+    def item_key(x):
+        return f"g:{x.name}" if isinstance(x, Group) else x.id
+
+    def layer_claims(self, items):
+        """Which effects hand their contribution to a later effect that picked them (Affects: Chosen). Returns
+        ({id of the chosen item: the picker}, {ids of pickers that got something}); each picker's layer is cleared."""
+        claims, claimers = {}, set()
+        for j, b in enumerate(items):
+            if isinstance(b, Group) or not b.pick or not b.on or b.removing:
+                continue
+            want = set(b.chosen)
+            for x in items[:j]:
+                if id(x) not in claims and not x.removing and x.on and self.item_key(x) in want:
+                    claims[id(x)] = b
+                    claimers.add(id(b))
+            if id(b) in claimers:
+                if getattr(b, "acc", None) is None or b.acc.tex.size != self.size:
+                    if getattr(b, "acc", None) is not None:
+                        b.acc.release()
+                    b.acc = Target(self.ctx, *self.size, "f2", 0.0)
+                b.acc.fbo.clear(0, 0, 0, 0)
+        return claims, claimers
+
+    def layer_add(self, picker, before, after, light=False):
+        """Add what an effect changed (after - before) into its picker's layer."""
+        picker.acc.fbo.use()
+        after.use(0)
+        before.use(4)
+        self.ctx.enable(moderngl.BLEND)
+        self.ctx.blend_func = moderngl.ONE, moderngl.ONE
+        set_u(self.delta_prog, "u_pos", 1.0 if light else 0.0)
+        self.delta_vao.render(vertices=3)
+        self.ctx.disable(moderngl.BLEND)
+
+    def layer_input(self, picker):
+        """Encode the picker's layer (0.5 = no change) for it to work on; returns (that texture, where it draws)."""
+        if len(self.lay) != 2 or self.lay[0].tex.size != self.size:
+            for t in self.lay:
+                t.release()
+            self.lay = [Target(self.ctx, *self.size, "f2", 0.0) for _ in range(2)]
+        enc, work = self.lay
+        enc.fbo.use()
+        picker.acc.tex.use(0)
+        self.enc_vao.render(vertices=3)
+        return enc.tex, work
+
+    def layer_combine(self, picker, inp, work, target):
+        """The picture with the picker's layer swapped for its worked version: picture - layer + worked layer."""
+        target.fbo.use()
+        inp.use(0)
+        picker.acc.tex.use(4)
+        work.tex.use(5)
+        self.comb_vao.render(vertices=3)
+
     def run_chain(self, items, inp, ping, scale=1.0):
         """Run a list of effects/groups over inp, ping-ponging between the two targets; returns the result.
         scale multiplies every effect's amount (look crossfades use it for Grow)."""
@@ -748,6 +822,7 @@ class Pipeline:
         fr = self._frame
         t, dt, level = fr["t"], fr["dt"], fr["level"]
         pi = 0
+        claims, claimers = self.layer_claims(items)
         for idx, f in enumerate(list(items)):
             f.mix = min(1.0, f.mix + fr["step"]) if f.on else max(0.0, f.mix - fr["step"])
             f.amt_smooth += (f.amt - f.amt_smooth) * fr["glide"]
@@ -806,6 +881,8 @@ class Pipeline:
                 set_u(prog, "u_blend", f.blend)
                 set_u(prog, "u_tw", glide_target(f, dt, self.trans_secs))
                 vao.render(vertices=3)
+                if id(f) in claims:
+                    self.layer_add(claims[id(f)], inp, ping[pi].tex)
                 inp, pi = ping[pi].tex, pi ^ 1
                 continue
             lv = self.level_of(f, t) if self.level_of and f.mod == MOD_AUDIO else level
@@ -819,7 +896,14 @@ class Pipeline:
             # else the plain feed shows through the middle of the transition
             f.live = f.amt_smooth * k * (fade if fr["style"] == 1 else 1.0) * (1.0 if f.xf_keep else scale)
             f.clock += dt * f.speed
-            inp.use(0)
+            lay = None
+            if f.pick:   # Affects: Chosen: works on the chosen effects' layer only (nothing chosen: nothing to do)
+                if id(f) not in claimers:
+                    f.live = 0.0
+                    continue
+                lay = self.layer_input(f)
+            src, dst = (lay[0], lay[1]) if lay else (inp, ping[pi])
+            src.use(0)
             if f.state_passes:
                 new = 1 - f.parity
                 for s, (sprog, svao) in enumerate(f.state_passes):
@@ -831,18 +915,22 @@ class Pipeline:
                 f.parity = new
                 for j, pair in enumerate(f.state):
                     pair[f.parity].tex.use(4 + j)
-            ping[pi].fbo.use()
+            dst.fbo.use()
             f.apply_uniforms(f.prog, (W, H), dt, lv, self.beat)
             set_u(f.prog, "u_masp", tuple(self.media_asp))
             set_u(f.prog, "u_mlive", tuple(self.media_live))
             set_u(f.prog, "u_plate_on", 1.0 if self.plate else 0.0)
             set_u(f.prog, "u_mix", fade * f.opacity)
-            set_u(f.prog, "u_blend", f.blend)
+            set_u(f.prog, "u_blend", 0 if lay else f.blend)
             # eraser/tracers work from the mask themselves; limiting them to subject/background would hide them
             set_u(f.prog, "u_tw", glide_target(f, dt, self.trans_secs))
             f.vao.render(vertices=3)
             if f.points:
-                self.run_points(f, ping[pi].fbo, (W, H), dt, level, fade * f.opacity)
+                self.run_points(f, dst.fbo, (W, H), dt, level, fade * f.opacity)
+            if lay:
+                self.layer_combine(f, inp, dst, ping[pi])
+            if id(f) in claims:
+                self.layer_add(claims[id(f)], inp, ping[pi].tex, f.cat in ("Overlay", "Audio"))
             inp, pi = ping[pi].tex, pi ^ 1
         return inp
 
@@ -1572,7 +1660,8 @@ class App:
         return dict(id=f.id, on=f.on, amt=f.amt, mod=f.mod, opacity=f.opacity, blend=f.blend,
                     centre=f.centre, opts=f.opts, params=f.pvals, speed=f.speed,
                     target=f.target, expanded=f.expanded, colours=f.colours, keep_out=f.keep_out, autos=f.autos,
-                    listen=f.listen, rng=f.rng, resp=f.resp, char=f.char, mresp=f.mresp, xs=f.xs, xr=f.xr)
+                    listen=f.listen, rng=f.rng, resp=f.resp, char=f.char, mresp=f.mresp, xs=f.xs, xr=f.xr,
+                    pick=f.pick, chosen=f.chosen)
 
     def item_from_dict(self, e, by_id, used):
         """Build a chain item from a look; effects are reused objects (one of each exists)."""
@@ -1617,6 +1706,7 @@ class App:
         f.resp = [float(x) for x in e["resp"]][:2] if e.get("resp") else None
         f.char, f.mresp = int(e.get("char", 0)), float(e.get("mresp", 0.5))
         f.xs, f.xr = float(e.get("xs", 1.0)), float(e.get("xr", 0.0))
+        f.pick, f.chosen = bool(e.get("pick", False)), [str(k) for k in e.get("chosen", [])]
         return f
 
     # --- auto-play

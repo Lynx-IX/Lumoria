@@ -101,17 +101,18 @@ uniform float u_width;                       // stereo width: 0 mono .. 1 wide
 uniform vec4 u_swell;                        // bass, mid, high, all as very slow envelopes: how loud it has BEEN
 uniform vec4 u_music;                        // flow clock (runs with the energy), beat clock (eased steps), bar position
 uniform int u_char;                          // this effect's Music character: 0 Reactive, 1 Swell, 2 Flow, 3 Rhythmic
-// The time an effect's internal structure should travel on. Reactive is plain effect time (nothing changes); Swell
-// adds the music's flow; Flow travels on the flow clock itself; Rhythmic steps on the beat, eased so it lands on it.
-float mClock(){
-  return u_char == 0 ? u_time : u_char == 1 ? u_time + u_music.x*.5 : u_char == 2 ? u_time*.3 + u_music.x
-       : u_time*.3 + u_music.y*.5;
-}
-// A hit-shaped signal for the character: Reactive and Rhythmic take the hit, Swell and Flow take the slow swell.
-float mPulse(float hit, float swell){ return (u_char == 1 || u_char == 2) ? swell : hit; }
 uniform vec2 u_centre;                       // movable centre for effects with center=True
 uniform float u_dt;                          // seconds since last frame
 uniform float u_speed;                       // the effect's Speed setting
+// The time an effect's internal structure should travel on. Reactive is plain effect time (nothing changes); Swell
+// adds the music's flow; Flow travels on the flow clock itself; Rhythmic steps on the beat, eased so it lands on it.
+float mClock(){
+  // the music's own travel obeys the effect's Speed too (0 holds it still, negative runs it back)
+  return u_char == 0 ? u_time : u_char == 1 ? u_time + u_music.x*.5*u_speed : u_char == 2 ? u_time*.3 + u_music.x*u_speed
+       : u_time*.3 + u_music.y*.5*u_speed;
+}
+// A hit-shaped signal for the character: Reactive and Rhythmic take the hit, Swell and Flow take the slow swell.
+float mPulse(float hit, float swell){ return (u_char == 1 || u_char == 2) ? swell : hit; }
 uniform sampler2D u_s0, u_s1;                // memory buffers for effects with "state" passes
 uniform sampler2D u_mask;                    // AI person matte: 1 = subject, 0 = background
 float maskAt(vec2 uv){ return texture(u_mask, uv).r; }
@@ -2939,24 +2940,37 @@ void main(){
     # Aurora: a flowing field of colour that follows the music's slow side: loudness swells it, brightness shifts its
     # colour, busyness stirs it up, the pan leans it left or right, and every kick flares it. No picture needed.
     dict(id="aurora", name="Aurora Field", amt=.6, amt_label="Intensity", speed=True, music=True, char=2, center=True, xform=True,
-         params=[("Detail", .5), ("Picture shows", .25), ("Kick flare", .5)],
+         params=[("Detail", .5), ("Picture shows", .25), ("Kick flare", .5), ("Drift", 0.)],
          options=[("Style", ["Curtains", "Nebula", "Ribbons"], 0),
                   ("Colour", PALETTES, 5), ("Colour motion", COLOUR_MOTION, 0)],
          code=VNOISE_GLSL + """
 float fbm(vec2 p){ float a = .5, s = 0.; for (int i = 0; i < 5; i++){ s += a*vnz(p); p = p*2.03 + 7.1; a *= .5; } return s; }
+// A noise field that MORPHS instead of travelling: it fades from one random field to the next in place, so the smoke
+// changes shape without sliding across the picture or going back and forth. ph is the morph clock.
+float mfbm(vec2 p, float ph){
+  float i = floor(ph), x = smoothstep(0., 1., ph - i);
+  float a = fbm(p + vec2(hash(vec2(i, 3.)), hash(vec2(i, 9.)))*40.);
+  float b = fbm(p + vec2(hash(vec2(i + 1., 3.)), hash(vec2(i + 1., 9.)))*40.);
+  float k = 1./sqrt((1. - x)*(1. - x) + x*x);              // two unrelated fields blended lose contrast; put it back
+  return .5 + (mix(a, b, x) - .5)*k;
+}
 void main(){
   vec3 src = tx(v_uv).rgb;
   float asp = u_res.x/u_res.y;
   vec2 p = vec2(v_uv.x*asp, v_uv.y);
-  float tc = mClock();                                      // the music's own time: flows, swells or steps on the beat
+  // the music's own time: flows, swells or steps on the beat. Scaled out, the folds get small, so time slows with
+  // them (else a fine pattern shimmers like static); Speed 0 holds the whole thing still
+  float tc = mClock()*min(u_xf.x, 1.);
   float t = tc*.1;
   float lean = (u_slow.w - .5)*2.;                         // pan: -1 left .. 1 right
   float busy = u_slow.z, energy = u_slow.x;
   float dens = mix(1.2, 3.2, u_p0)*(1. + .3*u_swell.y);   // the folds tighten as the mids swell
   vec2 q = u_opt0 == 0 ? vec2(p.x*dens*1.2, p.y*dens*.35) : p*dens;
-  q.x -= lean*tc*.12;                                   // it drifts toward where the sound is
-  vec2 w = vec2(fbm(q + vec2(t, 0.)), fbm(q + vec2(5.2, 1.3 - t)));
-  float n = fbm(q + w*(1.2 + 3.2*busy + 2.4*u_swell.x) + t*.6);   // the bass swells fold the smoke over on itself
+  float drift = u_p3;                                       // Drift: how much it also slides across (0 = only morphs in place)
+  q.x -= lean*tc*.12*drift;                                 // toward where the sound is, when it's allowed to slide
+  float ph = tc*.5;                                         // the morph clock
+  vec2 w = vec2(mfbm(q, ph), mfbm(q + vec2(5.2, 1.3), ph + .37));
+  float n = mfbm(q + w*(1.9 + 1.0*u_swell.x*min(abs(u_speed), 1.)) + vec2(t*.6, 0.)*drift, ph*.8);   // folds over on itself
   float f;
   if (u_opt0 == 0) {          // curtains: bright vertical folds, fading toward the bottom
     f = smoothstep(.28, .85, n)*smoothstep(1.05, .15, v_uv.y + (w.y - .5)*.25);

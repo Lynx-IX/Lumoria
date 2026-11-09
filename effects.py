@@ -2779,17 +2779,28 @@ AUDIO_EFFECTS = [
     # through, so it works over any source.
     dict(id="terrain", name="Spectrum Terrain", amt=.5, amt_label="Height", speed=True, center=True, xform=True,
          state=[TERRAIN_HIST], state_size=[(1, "f2")],
-         params=[("Scroll speed", .45), ("Lines", .7), ("Line weight", .4), ("Glow", .35)],
+         params=[("Scroll speed", .45), ("Lines", .7), ("Line weight", .4), ("Glow", .35), ("Picture warp", 0.)],
          options=[("Style", ["Ridge lines", "Solid terrain"], 0),
                   ("Behind", ["The picture", "Dark picture", "Black"], 1),
                   ("Colour", PALETTES, 5), ("Colour motion", COLOUR_MOTION, 0)],
          code="""
 void main(){
-  vec3 base = tx(v_uv).rgb;
   float every = mix(.12, .015, u_p0);
   float wi = mod(floor(u_time/every), 96.);
   int nl = int(mix(14., 48., u_p1));
   float H = clamp(u_amt, 0., 1.)*.62;
+  // Picture warp: the picture behind is pushed by the terrain's own heights, row by row in the same perspective, so
+  // the ridges seem to lift it (up where a peak is, sideways along its slopes)
+  vec2 wp = vec2(0.);
+  if (u_p4 > .001) {
+    float wz = pow(clamp((v_uv.y - .34)/.61, 0., 1.), 1./1.5);
+    float wr = floor(mod(wi - (1. - wz)*float(nl - 1)*(96./float(nl)) + 96., 96.));
+    float wx = (v_uv.x - .5)/mix(.62, 1., pow(wz, 1.5)) + .5, rv = (wr + .5)/96.;
+    float hc = texture(u_s0, vec2(wx, rv)).r;
+    float hs = texture(u_s0, vec2(wx + .015, rv)).r - texture(u_s0, vec2(wx - .015, rv)).r;
+    wp = vec2(hs*.5, -hc)*u_p4*.16*(.3 + clamp(u_amt, 0., 1.));
+  }
+  vec3 base = tx(v_uv + wp).rgb;
   float edge = mix(1.2, 3.2, u_p2)/u_res.y;
   vec3 bg = u_opt1 == 0 ? base : (u_opt1 == 1 ? base*.22 : vec3(0.));
   vec3 outc = bg;

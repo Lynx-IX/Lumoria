@@ -205,6 +205,8 @@ class Effect:
         set_u(prog, "u_ncols", len(cols))
         set_u(prog, "u_bands", beat["bands"])
         set_u(prog, "u_hits", beat["hits"])
+        set_u(prog, "u_slow", beat["slow"])
+        set_u(prog, "u_width", beat["width"])
         set_u(prog, "u_beats", beat["count"])
         set_u(prog, "u_since", beat["since"])
         set_u(prog, "u_beatlen", beat["len"])
@@ -344,8 +346,9 @@ class Pipeline:
         # 4-5 effect memory, 6-8 extra sources
         # audio for the shaders: a 128 x 2 float texture (row 0 spectrum, row 1 waveform) on unit 9, and
         # beat timing (bass, mid, high levels; beats counted; seconds since the last; seconds per beat)
-        self.audio_tex = ctx.texture((128, 2), 1, dtype="f4")
-        self.beat = dict(bands=(0.0, 0.0, 0.0), hits=(0.0, 0.0, 0.0, 0.0), count=0.0, since=10.0, len=0.5)
+        self.audio_tex = ctx.texture((128, 4), 1, dtype="f4")   # rows: spectrum, waveform, left, right
+        self.beat = dict(bands=(0.0, 0.0, 0.0), hits=(0.0, 0.0, 0.0, 0.0), slow=(0.0, 0.0, 0.0, 0.5), width=0.0,
+                         count=0.0, since=10.0, len=0.5)
         self.level_of = None   # (effect, t) -> its audio level, for effects that listen to their own source
         self.transition, self.trans_time, self.wave_rate = 0, 1.0, 0.25
         self.trans_unit, self.trans_secs = 0, 1.0   # trans_time is in seconds / beats / bars; trans_secs = seconds
@@ -2149,6 +2152,8 @@ class App:
         lv = self.audio.level
         b["bands"] = (lv["bass"] * self.gain, lv["mid"] * self.gain, lv["high"] * self.gain)
         b["hits"] = (lv["kick"], lv["snare"], lv["hat"], lv["accent"])
+        b["slow"] = (lv["energy"], lv["bright"], lv["busy"], lv["pan"])
+        b["width"] = lv["width"]
         self.pipe.audio_tex.write(self.audio.shader_data(t).tobytes())
         if self.auto_mode:
             every, unit = self.hold_time()

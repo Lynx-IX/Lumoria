@@ -95,7 +95,9 @@ uniform int u_ncols;                         // how many of them are in use (2..
 uniform vec3 u_bands;                        // bass, mid, high (0..1)
 uniform vec4 u_hits;                         // kick, snare / clap, hats, big kick: 1 on a hit, fading after
 uniform float u_beats, u_since, u_beatlen;   // beats counted so far, seconds since the last one, beat length
-uniform sampler2D u_audiotex;                // row 0: 128-band spectrum (low..high), row 1: waveform
+uniform sampler2D u_audiotex;                // rows: 128-band spectrum (low..high), waveform, left, right
+uniform vec4 u_slow;                         // energy (slow loudness), brightness, busyness, pan (0.5 = middle)
+uniform float u_width;                       // stereo width: 0 mono .. 1 wide
 uniform vec2 u_centre;                       // movable centre for effects with center=True
 uniform float u_dt;                          // seconds since last frame
 uniform float u_speed;                       // the effect's Speed setting
@@ -116,8 +118,10 @@ vec4 clean(vec2 uv){ return texture(u_clean, mirrorWrap(uv)); }
 mat2 rot(float a){ float c = cos(a), s = sin(a); return mat2(c,-s,s,c); }
 vec3 hueRot(vec3 c, float a){ const vec3 k = vec3(.57735); float ca = cos(a);
   return c*ca + cross(k,c)*sin(a) + k*dot(k,c)*(1.-ca); }
-float spectrum(float x){ return texture(u_audiotex, vec2(clamp(x, 0., 1.)*127./128. + .5/128., .25)).r; }
-float waveform(float x){ return texture(u_audiotex, vec2(clamp(x, 0., 1.)*127./128. + .5/128., .75)).r; }
+float spectrum(float x){ return texture(u_audiotex, vec2(clamp(x, 0., 1.)*127./128. + .5/128., .125)).r; }
+float waveform(float x){ return texture(u_audiotex, vec2(clamp(x, 0., 1.)*127./128. + .5/128., .375)).r; }
+float waveL(float x){ return texture(u_audiotex, vec2(clamp(x, 0., 1.)*127./128. + .5/128., .625)).r; }
+float waveR(float x){ return texture(u_audiotex, vec2(clamp(x, 0., 1.)*127./128. + .5/128., .875)).r; }
 // beat count that glides over ~0.2 s instead of jumping
 float beatGlide(){ return u_beats - 1. + smoothstep(0., .2, u_since); }
 """ + PALETTE_GLSL
@@ -274,7 +278,7 @@ void main(){
 # Output window blit: GL's screen origin is bottom-left, our images are top-first.
 BLIT = "void main(){ o = texture(u_tex, vec2(v_uv.x, 1.-v_uv.y)); }"
 
-CATEGORIES = ["Sources", "Cutout", "Interactive", "Motion", "Mirror & Geometry", "Stylize", "Colour", "Overlay", "Feedback"]
+CATEGORIES = ["Sources", "Cutout", "Interactive", "Audio", "Motion", "Mirror & Geometry", "Stylize", "Colour", "Overlay", "Feedback"]
 _CAT = {
     "zoom": "Motion", "shake": "Motion", "liquid": "Motion",
     "sym_lr": "Mirror & Geometry", "sym_tb": "Mirror & Geometry", "sym_quad": "Mirror & Geometry",
@@ -2689,9 +2693,241 @@ void main(){
 }"""),
 ]
 
+# ---- Audio visuals (2026-11): visualizers that work on any source, or none. The "Audio" category.
+# Spectrum Terrain keeps the spectrum's recent history in its memory buffer (128 columns x 96 rows spread over the
+# whole texture, one row refreshed per interval, round and round); Vectorscope keeps a fading trace of its light.
+TERRAIN_ROWS = 96
+TERRAIN_HIST = """
+void main(){
+  float every = mix(.12, .015, u_p0);
+  float wi = mod(floor(u_time/every), 96.);
+  float r = floor(v_uv.y*96.);
+  if (abs(r - wi) < .5) { o = vec4(spectrum(v_uv.x), 0., 0., 1.); return; }
+  o = texture(u_s0, v_uv); }"""
+
+SCOPE_TRACE = """
+// the stereo picture: left against right, turned 45 degrees so a mono sound is a vertical line and a wide one a cloud
+vec2 scopePoint(float t, float R){
+  float l = waveL(t), r = waveR(t);
+  return vec2((l - r)*.7071, -(l + r)*.7071)*R;
+}
+void main(){
+  float asp = u_res.x/u_res.y;
+  vec2 p = (v_uv - u_centre)*vec2(asp, 1.);
+  float R = mix(.12, .45, clamp(u_amt, 0., 1.));
+  float keep = texture(u_s0, v_uv).r*pow(mix(.55, .97, u_p0), u_dt*60.);   // the afterglow
+  float inten = 0.;
+  if (length(p) < R*1.6) {
+    float w = mix(.0022, .009, u_p1);
+    vec2 a = scopePoint(0., R);
+    for (int i = 1; i < 128; i++){
+      float t = float(i)/127.;
+      vec2 b = scopePoint(t, R);
+      float age = mix(.35, 1., t);   // the newest samples are brightest
+      if (u_opt0 == 0) {   // lines
+        vec2 pa = p - a, ba = b - a;
+        float h = clamp(dot(pa, ba)/max(dot(ba, ba), 1e-7), 0., 1.);
+        inten += smoothstep(w, w*.2, length(pa - ba*h))*age;
+      } else {             // dots
+        inten += smoothstep(w*1.8, w*.3, length(p - b))*age;
+      }
+      a = b;
+    }
+  }
+  o = vec4(max(keep, min(inten*.5, 1.6)), 0., 0., 1.); }"""
+
+AUDIO_EFFECTS = [
+    # Spectrum Terrain: the spectrum's last couple of seconds as rows of ridges receding into the distance, newest at
+    # the front: like the famous pulsar plot. Each ridge hides the ones behind it, with the picture (or black) showing
+    # through, so it works over any source.
+    dict(id="terrain", name="Spectrum Terrain", amt=.5, amt_label="Height", speed=True,
+         state=[TERRAIN_HIST], state_size=[(1, "f2")],
+         params=[("Scroll speed", .45), ("Lines", .7), ("Line weight", .4), ("Glow", .35)],
+         options=[("Style", ["Ridge lines", "Solid terrain"], 0),
+                  ("Behind", ["The picture", "Dark picture", "Black"], 1),
+                  ("Colour", PALETTES, 5), ("Colour motion", COLOUR_MOTION, 0)],
+         code="""
+void main(){
+  vec3 base = tx(v_uv).rgb;
+  float every = mix(.12, .015, u_p0);
+  float wi = mod(floor(u_time/every), 96.);
+  int nl = int(mix(14., 48., u_p1));
+  float H = clamp(u_amt, 0., 1.)*.62;
+  float edge = mix(1.2, 3.2, u_p2)/u_res.y;
+  vec3 bg = u_opt1 == 0 ? base : (u_opt1 == 1 ? base*.22 : vec3(0.));
+  vec3 outc = bg;
+  for (int i = 0; i < 48; i++){
+    if (i >= nl) break;
+    float z = float(i)/float(max(nl - 1, 1));
+    float zz = pow(z, 1.5);
+    float yb = mix(.34, .95, zz);
+    float sc = mix(.4, 1., zz);
+    float xr = (v_uv.x - .5)/mix(.62, 1., zz) + .5;
+    if (xr < 0. || xr > 1.) continue;
+    float age = float(nl - 1 - i)*(96./float(nl));          // newest in front
+    float r = floor(mod(wi - age + 96., 96.));
+    float h = texture(u_s0, vec2(xr, (r + .5)/96.)).r;
+    float top = yb - h*H*sc;
+    vec3 lc = palCycle(u_opt2, h*.7 + z*.4 + palPhase(u_opt3, v_uv), base)*mix(.4, 1.25, zz);
+    if (u_opt0 == 1 && v_uv.y > top) {   // solid: the ground under the ridge, shaded by its height
+      float depth = smoothstep(0., .22, v_uv.y - top);
+      outc = mix(lc*(.35 + .9*h), bg, depth*.85);
+    } else if (v_uv.y > top) {
+      outc = bg;                                              // hides the ridges behind this one
+    }
+    float d = abs(v_uv.y - top);
+    float line = smoothstep(edge*1.6, edge*.4, d);
+    outc += lc*(line + exp(-d*70.)*u_p3*.9*(.3 + h))*step(top, yb + .01);
+  }
+  o = vec4(outc, 1.); }"""),
+
+    # Vectorscope: the stereo sound drawn as light (left against right): a line for a mono sound, a swirling cloud for
+    # a wide mix, with an afterglow like a real scope. Nothing but the sound is needed; it glows over any picture.
+    dict(id="vectorscope", name="Vectorscope", amt=.5, amt_label="Size", center=True,
+         state=[SCOPE_TRACE], state_size=[(1, "f2")],
+         params=[("Afterglow", .55), ("Line weight", .4), ("Brightness", .6)],
+         options=[("Draw", ["Lines", "Dots"], 0), ("Colour", PALETTES, 1), ("Colour motion", COLOUR_MOTION, 0),
+                  ("Frame", ["None", "Graticule"], 1), ("Behind", ["The picture", "Dark picture", "Black"], 1)],
+         code="""
+void main(){
+  vec3 base = tx(v_uv).rgb;
+  vec3 bg = u_opt4 == 0 ? base : (u_opt4 == 1 ? base*.22 : vec3(0.));
+  float s = clamp(texture(u_s0, v_uv).r, 0., 2.);
+  float asp = u_res.x/u_res.y;
+  vec2 p = (v_uv - u_centre)*vec2(asp, 1.);
+  float R = mix(.12, .45, clamp(u_amt, 0., 1.));
+  vec3 col = palCycle(u_opt1, length(p)/R*.6 + palPhase(u_opt2, v_uv) + s*.15, base);
+  vec3 outc = bg + col*s*mix(.9, 2.4, u_p2);
+  if (u_opt3 == 1) {   // graticule: a ring and a cross, faint
+    float r = length(p), px = 1.5/u_res.y;
+    float g = smoothstep(px*1.4, 0., abs(r - R)) + smoothstep(px*1.4, 0., abs(r - R*.5))*.5
+            + smoothstep(px, 0., abs(p.x))*step(r, R)*.5 + smoothstep(px, 0., abs(p.y))*step(r, R)*.5;
+    outc += col*g*.18;
+  }
+  o = vec4(outc, 1.); }"""),
+
+    # Audio Warp: the picture bends with the music: the spectrum bounces its columns, the bass pumps it, and every
+    # kick, snare and hat sends a ring rippling out from the centre. Strength is the main slider.
+    dict(id="audiowarp", name="Audio Warp", amt=.5, amt_label="Strength", center=True,
+         params=[("Ring width", .45), ("Colour split", .35), ("Sideways", .3)],
+         options=[("Mode", ["Spectrum waves", "Bass pump", "Shockwaves on hits", "All of them"], 3),
+                  ("Rings from", ["The centre", "A different spot per drum"], 0)],
+         code="""
+vec2 ringPush(vec2 p, float h, float speed, float width, float amp){
+  float age = -.22*log(max(h, .003));            // seconds since the hit (its level fades as e^(-t/.22))
+  float rad = age*speed, r = length(p);
+  float prof = exp(-pow((r - rad)/width, 2.))*h*amp;
+  return p/max(r, 1e-3)*prof;
+}
+void main(){
+  float asp = u_res.x/u_res.y;
+  float A = clamp(u_amt, 0., 1.);
+  vec2 p = (v_uv - u_centre)*vec2(asp, 1.);
+  vec2 d = vec2(0.);
+  float spec = spectrum(v_uv.x);
+  if (u_opt0 == 0 || u_opt0 == 3) {   // each column bounces with its own part of the spectrum
+    d.y += (spec - .3)*A*.16;
+    d.x += (spectrum(v_uv.y) - .3)*A*.12*u_p2;
+  }
+  if (u_opt0 == 1 || u_opt0 == 3) {   // the bass breathes the whole picture; the pan tilts it
+    float z = (u_bands.x*.7 + u_hits.x*.3)*A*.2;
+    p *= 1. - z;
+    float a = (u_slow.w - .5)*A*.35;
+    p = mat2(cos(a), -sin(a), sin(a), cos(a))*p;
+  }
+  if (u_opt0 == 2 || u_opt0 == 3) {   // rings: kick is the big slow one, snare medium, hats fine and quick
+    float w = mix(.025, .1, u_p0);
+    vec2 o1 = u_opt1 == 1 ? vec2(0., .0) : vec2(0.), o2 = u_opt1 == 1 ? vec2(.28, -.12) : vec2(0.),
+         o3 = u_opt1 == 1 ? vec2(-.28, .14) : vec2(0.);
+    d += ringPush(p - o1, u_hits.x, .55, w*1.4, A*.34) + ringPush(p - o1, u_hits.w, .8, w*2.2, A*.26)
+       + ringPush(p - o2, u_hits.y, .75, w, A*.24) + ringPush(p - o3, u_hits.z, 1.1, w*.6, A*.15);
+  }
+  vec2 uv = p/vec2(asp, 1.) + u_centre + d*vec2(1./asp, 1.);
+  float split = u_p1*(u_bands.z*.7 + u_hits.z*.5 + .15)*A*.05;
+  vec2 sp = normalize(p + vec2(1e-4))*split;
+  o = vec4(tx(uv + sp).r, tx(uv).g, tx(uv - sp).b, 1.); }"""),
+
+    # Picture Spectrum: spectrum bars made of the picture itself: the bars show the video, the rest is dark (or dim).
+    dict(id="picspectrum", name="Picture Spectrum", amt=.55, amt_label="Height", center=True,
+         params=[("Bars", .45), ("Gap", .25), ("Tint", .25), ("Cap glow", .5)],
+         options=[("Style", ["Bars from the bottom", "Mirrored from the middle", "Radial"], 0),
+                  ("Outside the bars", ["Black", "Dim picture", "Picture"], 1),
+                  ("Colour", PALETTES, 5), ("Colour motion", COLOUR_MOTION, 2)],
+         code="""
+void main(){
+  vec3 src = tx(v_uv).rgb;
+  float asp = u_res.x/u_res.y, px = 1./u_res.y;
+  float nb = floor(mix(8., 72., u_p0));
+  float gap = mix(.04, .45, u_p1);
+  float H = mix(.15, .92, clamp(u_amt, 0., 1.));
+  float inside = 0., cap = 0., hue = v_uv.x, v = 0.;
+  if (u_opt0 == 2) {
+    vec2 p = (v_uv - u_centre)*vec2(asp, 1.);
+    float r = length(p), a = abs(atan(p.x, -p.y))/3.14159;
+    float i = floor(a*nb), f = fract(a*nb);
+    v = spectrum((i + .5)/nb);
+    float R0 = .1*(1. + u_bands.x*.2), len = v*H*.42;
+    float dr = r - R0;
+    inside = step(gap*.5, f)*step(f, 1. - gap*.5)*step(0., dr)*step(dr, len);
+    cap = step(gap*.5, f)*step(f, 1. - gap*.5)*smoothstep(3.*px, 0., abs(dr - len))*step(.02, v);
+    hue = a;
+  } else {
+    float x = u_opt0 == 1 ? abs(v_uv.x - .5)*2. : v_uv.x;
+    float i = floor(x*nb), f = fract(x*nb);
+    v = spectrum((i + .5)/nb);
+    float dy = u_opt0 == 1 ? abs(v_uv.y - .5)*2. : 1. - v_uv.y;
+    float len = v*H*(u_opt0 == 1 ? 1. : 1.05);
+    float inBar = step(gap*.5, f)*step(f, 1. - gap*.5);
+    inside = inBar*step(dy, len);
+    cap = inBar*smoothstep(3.*px*(u_opt0 == 1 ? 2. : 1.), 0., abs(dy - len))*step(.02, v);
+    hue = x;
+  }
+  vec3 tint = palCycle(u_opt2, hue*.9 + palPhase(u_opt3, v_uv), src);
+  vec3 lit = mix(src, src*tint*1.7, u_p2)*(1. + v*.35);
+  vec3 out_ = u_opt1 == 0 ? vec3(0.) : (u_opt1 == 1 ? src*.16 : src*.55);
+  vec3 col = mix(out_, lit, inside) + tint*cap*u_p3*1.6;
+  o = vec4(col, 1.); }"""),
+
+    # Aurora: a flowing field of colour that follows the music's slow side: loudness swells it, brightness shifts its
+    # colour, busyness stirs it up, the pan leans it left or right, and every kick flares it. No picture needed.
+    dict(id="aurora", name="Aurora Field", amt=.6, amt_label="Intensity", speed=True,
+         params=[("Detail", .5), ("Picture shows", .25), ("Kick flare", .5)],
+         options=[("Style", ["Curtains", "Nebula", "Ribbons"], 0),
+                  ("Colour", PALETTES, 5), ("Colour motion", COLOUR_MOTION, 0)],
+         code=VNOISE_GLSL + """
+float fbm(vec2 p){ float a = .5, s = 0.; for (int i = 0; i < 5; i++){ s += a*vnz(p); p = p*2.03 + 7.1; a *= .5; } return s; }
+void main(){
+  vec3 src = tx(v_uv).rgb;
+  float asp = u_res.x/u_res.y;
+  vec2 p = vec2(v_uv.x*asp, v_uv.y);
+  float t = u_time*.1;
+  float lean = (u_slow.w - .5)*2.;                         // pan: -1 left .. 1 right
+  float busy = u_slow.z, energy = u_slow.x;
+  float dens = mix(1.2, 3.2, u_p0);
+  vec2 q = u_opt0 == 0 ? vec2(p.x*dens*1.2, p.y*dens*.35) : p*dens;
+  q.x -= lean*u_time*.12;                                   // it drifts toward where the sound is
+  vec2 w = vec2(fbm(q + vec2(t, 0.)), fbm(q + vec2(5.2, 1.3 - t)));
+  float n = fbm(q + w*(1.2 + 3.2*busy) + t*.6);
+  float f;
+  if (u_opt0 == 0) {          // curtains: bright vertical folds, fading toward the bottom
+    f = smoothstep(.28, .85, n)*smoothstep(1.05, .15, v_uv.y + (w.y - .5)*.25);
+  } else if (u_opt0 == 1) {   // nebula: soft clouds everywhere
+    f = smoothstep(.3, .95, n);
+  } else {                    // ribbons: thin bright lines along the folds
+    f = smoothstep(.07, 0., abs(n - .5 - .12*sin(u_time*.3)))*1.3 + smoothstep(.4, .9, n)*.25;
+  }
+  float bright = (.2 + 1.1*energy)*clamp(u_amt, 0., 1.)*1.6 + u_hits.x*u_p2*.6;
+  vec3 col = palCycle(u_opt1, n*.8 + u_slow.y*.6 + w.x*.3 + palPhase(u_opt2, v_uv), src);
+  vec3 outc = src*u_p1 + col*f*bright;
+  o = vec4(outc, 1.); }"""),
+]
+
 EFFECTS += MORE_EFFECTS
+EFFECTS += AUDIO_EFFECTS
 _CAT.update(pixelsort="Stylize", stainedglass="Stylize", oilpaint="Stylize", tinyplanet="Mirror & Geometry",
             hologram="Cutout", aura="Cutout", disintegrate="Cutout", echoclones="Cutout", timegrid="Feedback")
+_CAT.update(visualizer="Audio", terrain="Audio", vectorscope="Audio", audiowarp="Audio", picspectrum="Audio",
+            aurora="Audio")
 
 for _fx in EFFECTS:
     _fx["cat"] = _CAT.get(_fx["id"], "Other")

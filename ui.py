@@ -1377,7 +1377,7 @@ KIND_ICONS = {"camera": fa.ICON_FA_VIDEO, "video": fa.ICON_FA_FILM, "image": fa.
 CAT_ICONS = {"Motion": fa.ICON_FA_ARROWS_UP_DOWN_LEFT_RIGHT, "Mirror & Geometry": fa.ICON_FA_SHAPES,
              "Stylize": fa.ICON_FA_STAR, "Colour": fa.ICON_FA_DROPLET, "Overlay": fa.ICON_FA_LAYER_GROUP,
              "Feedback": fa.ICON_FA_ARROWS_ROTATE, "Cutout": fa.ICON_FA_USER, "Sources": fa.ICON_FA_PHOTO_FILM,
-             "Interactive": fa.ICON_FA_HAND_SPARKLES, "Other": fa.ICON_FA_CUBES}
+             "Interactive": fa.ICON_FA_HAND_SPARKLES, "Audio": fa.ICON_FA_WAVE_SQUARE, "Other": fa.ICON_FA_CUBES}
 
 
 def source_picker(app, target, desc, src):

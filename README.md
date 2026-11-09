@@ -10,7 +10,7 @@ your music, and sends the result to OBS (Spout, window capture or the OBS Virtua
 file. Build looks, line them up in a playlist and fire them live, on the beat.
 
 ## Features
-- **58 GPU effects**: neon edges, kaleidoscope, mirror slice, pixel sort, stained glass, oil paint, tiny planet,
+- **63 GPU effects**: neon edges, kaleidoscope, mirror slice, pixel sort, stained glass, oil paint, tiny planet,
   glitch, datamosh, tracers, time grid, film looks, colour grading, visualizers and more, stacked in any order,
   each set to manual, audio-reactive or a wave.
 - **AI person cut-out** (Robust Video Matting on the GPU): put effects on you, on the background or both; erase
@@ -186,6 +186,25 @@ Built on the AI mask:
 - **Tiny Planet:** the picture wrapped into a little world with you standing on top, or a tunnel; Twist and spin.
 - **Time Grid:** tiles each showing a moment further back (2x2 to 4x4), whole pictures or each tile its own part
   of the frame, in reading order, from the centre out or shuffled on the beat.
+
+## Audio visuals
+The *Audio* category (with the Audio Visualizer) visualizes the sound on any picture, or none. They don't need the AI
+cut-out, and each has its own palette and colour motion:
+- **Spectrum Terrain:** the spectrum's recent past as rows of ridges receding into the distance, newest in front
+  (ridge lines or solid terrain), over the picture, a darkened picture or black. *Scroll speed* sets how fast time
+  flows.
+- **Vectorscope:** the stereo sound drawn as light, left against right: a vertical line for a mono sound, a swirling
+  cloud for a wide mix, with an afterglow like a real scope.
+- **Audio Warp:** the picture bends with the music: the spectrum bounces its columns, the bass pumps and tilts it
+  (with the pan), and every kick, snare and hat sends a ring rippling out (optionally from three different spots),
+  with a colour split on the highs.
+- **Picture Spectrum:** spectrum bars made of the picture itself: bars from the bottom, mirrored from the middle, or
+  radial, with the rest black, dim or the picture.
+- **Aurora Field:** a flowing field of colour driven by the music's slow side: Energy swells it, Brightness shifts its
+  colour, Busyness stirs it, the Pan leans it left or right, and every kick flares it (curtains, nebula or ribbons).
+
+All of them answer to *Hit sensitivity* and the audio input chosen on the Audio card, and their sliders can follow
+the sound too (right-click a slider).
 
 ## Interactive effects
 The *Interactive* category reacts to you, through the AI mask (Source: Person) or anything moving in the

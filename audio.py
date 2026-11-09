@@ -93,6 +93,7 @@ class AudioAnalyzer:
         self._range = {k: [1.0, 0.0] for k in (*keys, "energy", "bright", "busy", "width")}
         self._feat = dict(bal=0.0, width=0.0, bright=0.0, busy=0.0)   # from the audio thread, already smoothed
         self._energy = 0.0
+        self._wave_lr = (np.zeros(SPEC_N, np.float32), np.zeros(SPEC_N, np.float32))   # left / right, for scopes
         # for visualizers: log-spaced spectrum (0..1) and the latest stretch of waveform (-1..1)
         self._spec_raw = np.zeros(SPEC_N, np.float32)
         self._wave_raw = np.zeros(SPEC_N, np.float32)
@@ -154,17 +155,20 @@ class AudioAnalyzer:
         kicks = deque(maxlen=8)   # recent kick strengths, to tell the big ones
         state = dict(prev=None, samples=0, peak=0.0, peak_hops=0)
         feat = dict(bal=0.0, width=0.0, bright=0.0, busy=0.0)
+        bl, br = np.zeros(1024, np.float32), np.zeros(1024, np.float32)   # the last 1024 samples of each side
         cen = np.flatnonzero((freqs >= 30) & (freqs < 16000))
         busy_bins = np.flatnonzero((freqs >= 60) & (freqs < 8000))
         log_lo, log_hi = math.log(150.0), math.log(5000.0)
 
         def callback(indata, frames, _t, _status):
-            nonlocal buf
+            nonlocal buf, bl, br
             tap = self.tap
             if tap:
                 tap(indata.copy())
             mono = indata.mean(axis=1)
             buf = np.concatenate((buf, mono))[-n:]
+            left, right = indata[:, 0], indata[:, min(1, indata.shape[1] - 1)]
+            bl, br = np.concatenate((bl, left))[-1024:], np.concatenate((br, right))[-1024:]
             ease = lambda tau: 1.0 - math.exp(-frames / sr / tau)   # how far to move this block toward a new value
             loud = float(np.sqrt(np.mean(mono * mono)))
             if loud > 1e-4:   # (below that it's silence: leave the stereo picture and brightness where they were)
@@ -225,6 +229,7 @@ class AudioAnalyzer:
                 self._raw = raw
                 self._spec_raw, self._wave_raw, self._band_raw = spec, wave, band.astype(np.float32)
                 self._feat = dict(feat)
+                self._wave_lr = (bl[:: 1024 // SPEC_N].copy(), br[:: 1024 // SPEC_N].copy())
                 for h in hits:
                     self._hits[h] += 1
 
@@ -237,22 +242,27 @@ class AudioAnalyzer:
         self.stream, self.device_name = None, None
 
     def shader_data(self, t):
-        """128 x 2 floats for the GPU: spectrum, then waveform. With no input, a gentle idle ripple so
-        visualizers still show where they are."""
+        """128 x 4 floats for the GPU: spectrum, waveform, then the left and right waveforms (for scopes). With
+        no input, a gentle idle ripple so visualizers still show where they are."""
         if not self.stream:
             x = np.linspace(0, 1, SPEC_N, dtype=np.float32)
             spec = 0.25 + 0.15 * np.sin(x * 9 + t * 2.0) * np.sin(x * 3.1 - t * 1.3)
             wave = 0.3 * np.sin(x * 25 + t * 3) * np.sin(x * 3.14)
-            return np.stack([spec, wave]).astype(np.float32)
+            env = np.sin(x * 3.14)
+            return np.stack([spec, wave, 0.4 * np.sin(x * 25 + t * 3) * env,
+                             0.4 * np.sin(x * 37 - t * 2) * env]).astype(np.float32)
         with self._lock:
             spec, wave = self._spec_raw.copy(), self._wave_raw.copy()
+            wl, wr = self._wave_lr
         # auto-range against a slow-falling peak, then rise fast / fall slowly like a meter
         self._spec_peak = max(float(spec.max()), self._spec_peak * 0.995, 0.2)
         floor = 0.25
         target = np.clip((spec - floor) / max(self._spec_peak - floor, 0.05), 0, 1)
         self.spectrum += (target - self.spectrum) * np.where(target > self.spectrum, 0.6, 0.12)
         peak = max(float(np.abs(wave).max()), 1e-3)
-        return np.stack([self.spectrum, wave / max(peak, 0.1)]).astype(np.float32)
+        side = max(float(np.abs(wl).max()), float(np.abs(wr).max()), 1e-3)   # one scale for both, so the shape holds
+        return np.stack([self.spectrum, wave / max(peak, 0.1), wl / max(side, 0.1),
+                         wr / max(side, 0.1)]).astype(np.float32)
 
     @staticmethod
     def _autorange(r, v, slow=False):

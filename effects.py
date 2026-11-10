@@ -88,7 +88,7 @@ in vec2 v_uv; out vec4 o;
 uniform sampler2D u_tex, u_prev, u_clean;   // chain input, last output frame, untouched feed
 uniform vec2 u_res;
 uniform float u_time, u_amt, u_audio;
-uniform int u_opt0, u_opt1, u_opt2, u_opt3, u_opt4, u_opt5;  // per-effect dropdown choices
+uniform int u_opt0, u_opt1, u_opt2, u_opt3, u_opt4, u_opt5, u_opt6, u_opt7;  // per-effect dropdown choices
 uniform float u_p0, u_p1, u_p2, u_p3, u_p4, u_p5;            // per-effect extra sliders
 uniform vec3 u_cols[8];                     // the effect's own colours, for the "Custom" palette
 uniform int u_ncols;                         // how many of them are in use (2..8)
@@ -313,7 +313,7 @@ void main(){
 # Output window blit: GL's screen origin is bottom-left, our images are top-first.
 BLIT = "void main(){ o = texture(u_tex, vec2(v_uv.x, 1.-v_uv.y)); }"
 
-CATEGORIES = ["Sources", "Cutout", "Interactive", "Audio", "Motion", "Mirror & Geometry", "Stylize", "Colour", "Overlay", "Feedback"]
+CATEGORIES = ["Sources", "Cutout", "Interactive", "Audio", "3D", "Motion", "Mirror & Geometry", "Stylize", "Colour", "Overlay", "Feedback"]
 _CAT = {
     "zoom": "Motion", "shake": "Motion", "liquid": "Motion",
     "sym_lr": "Mirror & Geometry", "sym_tb": "Mirror & Geometry", "sym_quad": "Mirror & Geometry",
@@ -2991,6 +2991,15 @@ _CAT.update(pixelsort="Stylize", stainedglass="Stylize", oilpaint="Stylize", tin
             hologram="Cutout", aura="Cutout", disintegrate="Cutout", echoclones="Cutout", timegrid="Feedback")
 _CAT.update(visualizer="Audio", terrain="Audio", vectorscope="Audio", audiowarp="Audio", picspectrum="Audio",
             aurora="Audio")
+
+# ---- 3D effects (effects3d.py): instanced meshes drawn with depth, laid over a background by their own pass
+from effects3d import COMPOSE as COMPOSE_3D, EFFECTS_3D, FOG as FOG_3D, GL3D, RAY3D, geometry as geometry_3d  # noqa: E402
+MESH_VHEAD = HEAD.replace("in vec2 v_uv; out vec4 o;", "in vec3 in_pos; in vec3 in_nrm; out vec2 v_uv;", 1)
+for _fx in EFFECTS_3D:
+    _fx["code"] = GL3D + COMPOSE_3D + RAY3D + _fx["code"]
+    _CAT[_fx["id"]] = "3D"
+    _fx["center"] = _fx["xform3d"] = True   # Centre / Scale / Rotate place the 3D picture on screen
+EFFECTS += EFFECTS_3D
 
 for _fx in EFFECTS:
     _fx["cat"] = _CAT.get(_fx["id"], "Other")

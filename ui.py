@@ -1424,7 +1424,7 @@ KIND_ICONS = {"camera": fa.ICON_FA_VIDEO, "video": fa.ICON_FA_FILM, "image": fa.
 CAT_ICONS = {"Motion": fa.ICON_FA_ARROWS_UP_DOWN_LEFT_RIGHT, "Mirror & Geometry": fa.ICON_FA_SHAPES,
              "Stylize": fa.ICON_FA_STAR, "Colour": fa.ICON_FA_DROPLET, "Overlay": fa.ICON_FA_LAYER_GROUP,
              "Feedback": fa.ICON_FA_ARROWS_ROTATE, "Cutout": fa.ICON_FA_USER, "Sources": fa.ICON_FA_PHOTO_FILM,
-             "Interactive": fa.ICON_FA_HAND_SPARKLES, "Audio": fa.ICON_FA_WAVE_SQUARE, "Other": fa.ICON_FA_CUBES}
+             "Interactive": fa.ICON_FA_HAND_SPARKLES, "Audio": fa.ICON_FA_WAVE_SQUARE, "3D": fa.ICON_FA_CUBE, "Other": fa.ICON_FA_CUBES}
 
 
 def source_picker(app, target, desc, src):
@@ -2292,42 +2292,65 @@ def automation_menu(app, f, key, lo, hi, name):
                                               u32(MAGENTA if heard else CYAN),
                                               fa.ICON_FA_MUSIC if heard else fa.ICON_FA_WAVE_SQUARE)
     if imgui.is_item_hovered() and not a and not S.auto_buttons:
-        imgui.set_tooltip("Right-click: make it move on its own, or follow the music")
+        imgui.set_tooltip("Right-click: make it float around on its own" if key == "centre"
+                          else "Right-click: make it move on its own, or follow the music")
     if not imgui.begin_popup_context_item(f"auto_{key}"):
         return
     bold(f"Automate: {name}", 15)
     imgui.separator()
     on = a is not None
-    changed, on = imgui.checkbox("Move on its own", on)
+    changed, on = imgui.checkbox("Float around on its own" if key == "centre" else "Move on its own", on)
     if changed:
-        if on:
+        if on and key == "centre":
+            a = f.autos[key] = dict(path=0, rate=8.0, unit=0, size=0.2, base=list(f.centre), phase=0.0, shape=0)
+        elif on:
             a = f.autos[key] = dict(shape=0, rate=1.0, unit=2, lo=lo, hi=hi, phase=0.0, band=0)
         else:
             f.autos.pop(key, None)
             a = None
-    if a:
+    if a and key == "centre":
+        centre_auto_controls(app, f, a, sc(300))
+    elif a:
         w = sc(300)
         label("Shape")
         imgui.set_next_item_width(w)
         _, a["shape"] = imgui.combo("##ashape", a["shape"], app.AUTO_SHAPES)
-        if a["shape"] == 7:
+        shape = a["shape"]
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("Spin: keeps going one way forever, no back-and-forth\n"
+                              "Intro: when the effect comes on, glides From -> To once, then holds")
+        if shape == 7:
             audio_map_controls(app, f, key, a, w)
         else:
-            label("Every")
+            label("One turn" if shape == 8 else "Takes" if shape == 9 else "Every")
             imgui.set_next_item_width(w - sc(156))
             r_lo, r_hi, fmt = AUTO_RATES[a["unit"]]
             _, a["rate"] = slider_float("##arate", a["rate"], r_lo, r_hi, fmt, imgui.SliderFlags_.logarithmic)
             imgui.same_line(0, 6)
             a["unit"] = segmented("aunit", tempo.UNITS, a["unit"], VIOLET, sc(150))
-            label("Phase")
+            if shape == 8:
+                label("Direction")
+                a["dir"] = segmented("adir", ("Forward", "Backward"), a.get("dir", 0), VIOLET, w)
+            elif shape == 9:
+                label("Ease")
+                imgui.set_next_item_width(w - sc(90))
+                _, a["ease"] = imgui.combo("##aease", a.get("ease", 0), app.INTRO_EASES)
+                imgui.same_line(0, 6)
+                if imgui.button("Replay", V(sc(84), 0)):
+                    f.intro_reset = True
+            else:
+                label("Phase")
+                imgui.set_next_item_width(w)
+                _, a["phase"] = slider_float("##aphase", a["phase"], 0.0, 1.0, "%.2f")
+        if not (shape == 8 and key == "xr"):   # Rotate spins in whole turns
+            label("From")
             imgui.set_next_item_width(w)
-            _, a["phase"] = slider_float("##aphase", a["phase"], 0.0, 1.0, "%.2f")
-        label("From")
-        imgui.set_next_item_width(w)
-        _, a["lo"] = slider_float("##alo", a["lo"], lo, hi, "%.2f")
-        label("To")
-        imgui.set_next_item_width(w)
-        _, a["hi"] = slider_float("##ahi", a["hi"], lo, hi, "%.2f")
+            _, a["lo"] = slider_float("##alo", a["lo"], lo, hi, "%.2f")
+            label("To")
+            imgui.set_next_item_width(w)
+            _, a["hi"] = slider_float("##ahi", a["hi"], lo, hi, "%.2f")
+        if shape == 8 and key != "xr":
+            imgui.text_colored(DIM, "Runs From -> To, then starts over: seamless when\nboth ends look the same (angles, hues).")
         imgui.text_colored(DIM, "Saved with the look. Morph transitions pause it while they slide.")
     imgui.end_popup()
 
@@ -2360,6 +2383,31 @@ def auto_button(app, f, key, name):
         tip = f"Automate {name}: make it move on its own" + chr(10) + "(an LFO in time with the tempo) or follow the music"
     if icon_button(icon, f"ab_{key}", col, tip, hover_col=col):
         imgui.open_popup(f"auto_{key}")
+
+
+def centre_auto_controls(app, f, a, w):
+    """The Centre floating on its own: a path round a base point."""
+    label("Path")
+    imgui.set_next_item_width(w)
+    _, a["path"] = imgui.combo("##cpath", a.get("path", 0), app.CENTRE_PATHS)
+    if a["path"] != 4:
+        label("Every")
+        imgui.set_next_item_width(w - sc(156))
+        r_lo, r_hi, fmt = AUTO_RATES[a["unit"]]
+        _, a["rate"] = slider_float("##crate", a["rate"], r_lo, r_hi, fmt, imgui.SliderFlags_.logarithmic)
+        imgui.same_line(0, 6)
+        a["unit"] = segmented("cunit", tempo.UNITS, a["unit"], VIOLET, sc(150))
+    label("Size")
+    imgui.set_next_item_width(w)
+    _, a["size"] = slider_float("##csize", a.get("size", 0.2), 0.0, 0.6, "%.2f")
+    label("Around")
+    imgui.set_next_item_width(w - sc(90))
+    _, a["base"] = slider_float2("##cbase", a.get("base", [0.5, 0.5]), 0.0, 1.0, "%.2f")
+    a["base"] = list(a["base"])
+    imgui.same_line(0, 6)
+    if imgui.button("Middle", V(sc(84), 0)):
+        a["base"] = [0.5, 0.5]
+    imgui.text_colored(DIM, "Saved with the look. Turn it off to place the Centre by hand again.")
 
 
 def effect_body(app, f):
@@ -2402,7 +2450,10 @@ def effect_body(app, f):
     if f.has_centre:
         label("Centre")
         imgui.set_next_item_width(imgui.get_content_region_avail().x - 64 - auto_w())
-        _, f.centre = slider_float2("##centre", f.centre, 0.0, 1.0, "%.2f")
+        moved, f.centre = slider_float2("##centre", f.centre, 0.0, 1.0, "%.2f")
+        if moved and "centre" in f.autos:   # floating: moving it moves the point it floats round
+            f.autos["centre"]["base"] = list(f.centre)
+        automation_menu(app, f, "centre", 0.0, 1.0, "Centre")
         imgui.same_line(0, 4)
         picking = app.picking is f
         if icon_button(fa.ICON_FA_CROSSHAIRS, "pick", MAGENTA if picking else DIM,
@@ -2411,7 +2462,9 @@ def effect_body(app, f):
         imgui.same_line(0, 4)
         if icon_button(fa.ICON_FA_ROTATE_LEFT, "rc", DIM, "Reset to the middle"):
             f.centre = [0.5, 0.5]
-        auto_button(app, f, None, "Centre")
+            if "centre" in f.autos:
+                f.autos["centre"]["base"] = [0.5, 0.5]
+        auto_button(app, f, "centre", "Centre")
     if f.xform:
         label("Scale")
         imgui.set_next_item_width(imgui.get_content_region_avail().x - 32 - auto_w())
@@ -2908,6 +2961,8 @@ def pick_centre(app, lo, hi):
         x = min(1.0, max(0.0, (m.x - lo.x) / (hi.x - lo.x)))
         y = min(1.0, max(0.0, (m.y - lo.y) / (hi.y - lo.y)))
         f.centre = [1 - x if app.flip_preview else x, y]
+        if "centre" in f.autos:   # floating: the pick sets the point it floats round
+            f.autos["centre"]["base"] = list(f.centre)
         app.pick_dragging = True
     elif app.pick_dragging:
         app.picking, app.pick_dragging = None, False

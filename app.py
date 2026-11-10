@@ -130,7 +130,7 @@ class Effect:
         self.has_speed = spec.get("speed", False)
         self.pick = False            # "Affects: Chosen": works only on what the chosen effects above it contributed
         self.chosen = []             # their keys (effect id, or "g:" + a group's name)
-        self.xform = spec.get("xform", False)   # shared Scale / Rotate about the Centre (see effects.xform_code)
+        self.xform = spec.get("xform", False) or spec.get("xform3d", False)   # shared Scale / Rotate about the Centre (see effects.xform_code; 3D effects place their scene instead)
         self.xs, self.xr = 1.0, 0.0
         self.music = spec.get("music", False)   # shows the Music character controls even before audio is on
         self.speed, self.clock = 1.0, 0.0
@@ -172,6 +172,23 @@ class Effect:
                 for name, unit in (("u_tex", 0), ("u_prev", 1), ("u_clean", 2), ("u_mask", 3), ("u_s0", 4),
                                    ("u_s1", 5), ("u_audiotex", 9), ("u_pos", 10)):
                     set_u(prog, name, unit)
+        # 3D: thousands of copies of one small shape (instancing), drawn with depth into the shared scene, which
+        # the effect's own pass then reads as u_scene (see effects3d.py)
+        self.mesh = None
+        if "mesh" in spec:
+            m = spec["mesh"]
+            vbo = ctx.buffer(E.geometry_3d(m["shape"]).tobytes())
+            prog = ctx.program(vertex_shader=E.MESH_VHEAD + m["vert"], fragment_shader=E.HEAD + m["frag"])
+            # a shader that never uses the normal has it optimised away: skip those bytes instead
+            layout = (vbo, "3f 3f", "in_pos", "in_nrm") if "in_nrm" in prog else (vbo, "3f 12x", "in_pos")
+            vao = ctx.vertex_array(prog, [layout])
+            for name, unit in (("u_tex", 0), ("u_prev", 1), ("u_clean", 2), ("u_mask", 3), ("u_s0", 4),
+                               ("u_s1", 5), ("u_m0", 6), ("u_m1", 7), ("u_m2", 8), ("u_audiotex", 9),
+                               ("u_plate", 11)):
+                set_u(prog, name, unit)
+            self.mesh = dict(prog=prog, vao=vao, vbo=vbo, verts=vbo.size // 24, count=m["count"],
+                             add=m.get("blend") == "add", fog=E.FOG_3D.get(spec["id"], 0.2))
+            set_u(self.prog, "u_scene", 13)
         self.target = 0              # 0 everything, 1 subject only, 2 background only
         self.tw = [1.0, 0.0, 0.0]    # the same as gliding weights, see glide_target
         self.place_first = spec.get("first", False)
@@ -182,6 +199,8 @@ class Effect:
         objs += [t for pair in self.state for t in pair]
         if self.points:
             objs += [o for k in ("update", "draw") for o in self.points[k]] + self.points["pos"]
+        if self.mesh:
+            objs += [self.mesh["prog"], self.mesh["vao"], self.mesh["vbo"]]
         for o in objs:
             o.release()
 
@@ -915,6 +934,8 @@ class Pipeline:
                 f.parity = new
                 for j, pair in enumerate(f.state):
                     pair[f.parity].tex.use(4 + j)
+            if f.mesh:
+                self.run_mesh(f, (W, H), dt, lv)
             dst.fbo.use()
             f.apply_uniforms(f.prog, (W, H), dt, lv, self.beat)
             set_u(f.prog, "u_masp", tuple(self.media_asp))
@@ -933,6 +954,50 @@ class Pipeline:
                 self.layer_add(claims[id(f)], inp, ping[pi].tex, f.cat in ("Overlay", "Audio"))
             inp, pi = ping[pi].tex, pi ^ 1
         return inp
+
+    def scene_target(self, w, h):
+        """The shared 3D scene: a multisampled colour + depth target to draw into, resolved into a mipmapped
+        texture (the mips give the glow its blur)."""
+        sc = getattr(self, "scene", None)
+        if sc and sc["size"] == (w, h):
+            return sc
+        if sc:
+            for k in ("ms", "col", "dep", "res", "tex"):
+                sc[k].release()
+        ctx = self.ctx
+        samples = min(4, ctx.max_samples)
+        col = ctx.renderbuffer((w, h), 4, samples=samples, dtype="f2")
+        dep = ctx.depth_renderbuffer((w, h), samples=samples)
+        tex = ctx.texture((w, h), 4, dtype="f2")
+        tex.repeat_x = tex.repeat_y = False
+        tex.filter = (moderngl.LINEAR_MIPMAP_LINEAR, moderngl.LINEAR)
+        self.scene = dict(size=(w, h), col=col, dep=dep, ms=ctx.framebuffer([col], dep), tex=tex,
+                          res=ctx.framebuffer([tex]))
+        return self.scene
+
+    def run_mesh(self, f, size, dt, level):
+        """Draw an effect's 3D shapes into the scene and leave the result on texture unit 13 (u_scene)."""
+        m, sc, ctx = f.mesh, self.scene_target(*size), self.ctx
+        count = m["count"](f) if callable(m["count"]) else m["count"]
+        prog = m["prog"]
+        sc["ms"].use()
+        sc["ms"].clear(0.0, 0.0, 0.0, 0.0, depth=1.0)
+        f.apply_uniforms(prog, size, dt, level, self.beat)
+        set_u(prog, "u_fog", m["fog"])
+        set_u(prog, "u_mlive", tuple(self.media_live))
+        set_u(prog, "u_plate_on", 1.0 if self.plate else 0.0)
+        if m["add"]:   # light that adds up: no depth sorting needed
+            ctx.enable(moderngl.BLEND)
+            ctx.blend_func = moderngl.ONE, moderngl.ONE
+            m["vao"].render(moderngl.TRIANGLES, vertices=m["verts"], instances=count)
+            ctx.disable(moderngl.BLEND)
+        else:
+            ctx.enable(moderngl.DEPTH_TEST)
+            m["vao"].render(moderngl.TRIANGLES, vertices=m["verts"], instances=count)
+            ctx.disable(moderngl.DEPTH_TEST)
+        ctx.copy_framebuffer(sc["res"], sc["ms"])
+        sc["tex"].build_mipmaps()
+        sc["tex"].use(13)
 
     def run_points(self, f, target, size, dt, level, mix):
         """Move an effect's point particles (its state 0 is the velocity field), then add them as glowing
@@ -1701,6 +1766,7 @@ class App:
         f.tw = target_weights(f.target)   # a look arrives with its own setting, no glide
         f.keep_out = e.get("keep_out", False)
         f.autos = copy_autos(e.get("autos", {}))
+        f.intro_reset = True   # a look's Intros play from the start each time it loads
         f.listen = e.get("listen") if e.get("listen") in A.SOURCE_KEYS else None
         f.rng = [float(x) for x in e.get("rng", [80.0, 250.0])][:2]
         f.resp = [float(x) for x in e["resp"]][:2] if e.get("resp") else None
@@ -1874,7 +1940,40 @@ class App:
                 f.morph = None
 
     # --- automation: any effect setting can move on its own, like an LFO, timed by the tempo clock
-    AUTO_SHAPES = ["Sine", "Triangle", "Ramp up", "Ramp down", "Square", "Random steps", "Smooth random", "Audio"]
+    AUTO_SHAPES = ["Sine", "Triangle", "Ramp up", "Ramp down", "Square", "Random steps", "Smooth random", "Audio",
+                   "Spin", "Intro"]
+    # Spin: keeps going one way forever (Rotate wraps round seamlessly; other sliders run From -> To and start over).
+    # Intro: when the effect comes on (or its look loads), glides From -> To over "Every", then holds there.
+    INTRO_EASES = ["Smooth", "Fast start", "Slow start", "Linear"]
+    # position automation (the Centre): the path it floats along
+    CENTRE_PATHS = ["Drift", "Orbit", "Figure 8", "Bounce", "Hop on the beat"]
+
+    def centre_path(self, a, cyc, beats):
+        """Where an automated Centre is now: its path round the base point, size in frame heights."""
+        bx, by = a.get("base", [0.5, 0.5])
+        size, path = a.get("size", 0.2), a.get("path", 0)
+        w, h = self.pipe.size or (16, 9)
+        asp = w / max(h, 1)
+        tau = 2 * math.pi
+        if path == 0:     # drift: slow, wandering, never quite repeating
+            dx = 0.6 * math.sin(tau * cyc) + 0.4 * math.sin(tau * cyc * 1.618 + 1.3)
+            dy = 0.6 * math.sin(tau * cyc * 0.83 + 2.1) + 0.4 * math.sin(tau * cyc * 1.37 + 0.4)
+        elif path == 1:   # orbit
+            dx, dy = math.cos(tau * cyc), math.sin(tau * cyc)
+        elif path == 2:   # figure 8
+            dx, dy = math.sin(tau * cyc), math.sin(2 * tau * cyc) * 0.5
+        elif path == 3:   # bounce off the edges of its box
+            tri = lambda x: 4 * abs((x % 1.0) - 0.5) - 1
+            dx, dy = tri(cyc), tri(cyc * 0.731 + 0.25)
+        else:             # hop: a new spot on each beat, gliding there quickly
+            rnd = lambda i, sd: (math.sin(i * 12.9898 + sd * 78.233) * 43758.5453) % 1.0
+            i, fr = math.floor(beats), beats % 1.0
+            k = min(1.0, fr / 0.3)
+            k = k * k * (3 - 2 * k)
+            px, py = rnd(i - 1, 1) * 2 - 1, rnd(i - 1, 2) * 2 - 1
+            nx, ny = rnd(i, 1) * 2 - 1, rnd(i, 2) * 2 - 1
+            dx, dy = px + (nx - px) * k, py + (ny - py) * k
+        return [bx + dx * size / asp, by + dy * size]
 
     def effect_level(self, f, t):
         """The audio level an Audio-driven effect follows: its own source (or the main React to), smoothed by
@@ -1932,10 +2031,19 @@ class App:
         for f in walk(self.pipe.order):
             if isinstance(f, Group) or not f.autos or f.morph:
                 continue
+            if getattr(f, "intro_reset", False) or not f.on or f.removing:   # Intros start again next time it's on
+                f.intro_reset = False
+                for k in [k for k in self.auto_state if k[0] == f.uid and k[-1] == "intro"]:
+                    del self.auto_state[k]
+                if not f.on or f.removing:
+                    continue
             for key, a in f.autos.items():
                 rate = max(a["rate"], 0.01)
-                cyc = t / rate if a["unit"] == 0 else tp.phase / (rate * (1 if a["unit"] == 1 else tp.beats_per_bar))
-                cyc += a["phase"]
+                raw = t / rate if a["unit"] == 0 else tp.phase / (rate * (1 if a["unit"] == 1 else tp.beats_per_bar))
+                cyc = raw + a.get("phase", 0.0)
+                if key == "centre":
+                    f.centre = self.centre_path(a, cyc, tp.phase)
+                    continue
                 x, s, seed = cyc % 1.0, a["shape"], len(key) + ord(key[-1])
                 if s == 0:
                     w = 0.5 - 0.5 * math.cos(2 * math.pi * x)
@@ -1952,6 +2060,17 @@ class App:
                 elif s == 6:
                     i, fr = math.floor(cyc), cyc % 1.0
                     w = rnd(i, seed) + (rnd(i + 1, seed) - rnd(i, seed)) * fr * fr * (3 - 2 * fr)
+                elif s == 8:   # spin: one way, forever
+                    turn = cyc if a.get("dir", 0) == 0 else -cyc
+                    if key == "xr":   # Rotate: whole turns, wrapped inside the slider so it never jumps
+                        f.xr = (turn * 360.0 + 360.0) % 720.0 - 360.0
+                        continue
+                    w = turn % 1.0
+                elif s == 9:   # intro: From -> To once, from when it came on, then hold
+                    st = self.auto_state.setdefault((f.uid, key, "intro"), [raw])
+                    u = min(1.0, max(0.0, raw - st[0]))
+                    e = a.get("ease", 0)
+                    w = u * u * (3 - 2 * u) if e == 0 else 1 - (1 - u) ** 3 if e == 1 else u ** 3 if e == 2 else u
                 else:
                     w = self.audio_drive(f, key, a, t)
                 v = a["lo"] + (a["hi"] - a["lo"]) * w

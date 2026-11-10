@@ -110,7 +110,7 @@ TOPBAR_H, PLAYLIST_SHUT_H, LABEL_W, GAP = 54, 52, 96, 6   # GAP: draggable seam 
 SETTINGS_FILE = os.path.join(DATA, "ui_settings.json")
 LAYOUT_DEFAULTS = dict(sidebar_w=410.0, playlist_h=196.0, playlist_open=True, scale=1.0, card_cols=0,
                        theme="Console", accent=0, header_tint=False, side_tab=0, welcomed=False,
-                       card_warnings=0, logo_look=0, theme_keys=0, fx_view=1, fx_keep=0, fx_layout=0, num_boxes=1)
+                       card_warnings=0, logo_look=0, theme_keys=0, fx_view=1, fx_keep=0, fx_layout=0, num_boxes=1, auto_buttons=1)
 CARD_MIN_W = 300   # auto grid: a new column of effect cards appears whenever this much more width fits
 
 
@@ -130,6 +130,7 @@ class _State:
     welcome_open = False
     fx_view = 1                    # Effects tab: 0 cards, 1 outline (the default) (a list, with the open effect(s) below it)
     num_boxes = 1                  # a number box beside each wide slider, to type an exact value
+    auto_buttons = 1               # an Automate button at the end of each automatable slider (0: right-click only)
     fx_keep = 0                    # outline: 0 opening an effect closes the others, 1 keeps them open
     fx_layout = 0                  # outline: 0 auto (beside the list when wide, else under its row), 1 under the row, 2 beside
     fx_seen, fx_shift = None, False   # outline: which effects were open last frame; a Shift-click this frame
@@ -1344,6 +1345,14 @@ def interface_section():
     if imgui.is_item_hovered():
         imgui.set_tooltip("A small box beside each wide slider to type an exact value (Enter to apply)" + chr(10) +
                           "Double-click or Ctrl+click a slider also works either way")
+    label("Automate")
+    ab = segmented("autobuttons", ("Right-click only", "Buttons"), S.auto_buttons, CYAN)
+    if ab != S.auto_buttons:
+        S.auto_buttons = ab
+        save_layout()
+    if imgui.is_item_hovered():
+        imgui.set_tooltip("Buttons: a wave button at the end of every slider that can move on its own;" + chr(10) +
+                          "it lights up while that slider is automated. Right-clicking a slider works either way")
     label("Open effects")
     fl = segmented("fxlayout", ("Auto", "Under the row", "Beside the list"), S.fx_layout, CYAN)
     if fl != S.fx_layout:
@@ -2276,13 +2285,13 @@ def automation_menu(app, f, key, lo, hi, name):
     """Right-click the slider just drawn: make it move on its own (an LFO timed by the tempo). An automated
     slider shows a wave mark beside it."""
     a = f.autos.get(key)
-    if a:
+    if a and not S.auto_buttons:
         mn, mx = imgui.get_item_rect_min(), imgui.get_item_rect_max()
         heard = a["shape"] == 7
         imgui.get_window_draw_list().add_text(V(mn.x - sc(17), mn.y + (mx.y - mn.y - imgui.get_text_line_height()) / 2),
                                               u32(MAGENTA if heard else CYAN),
                                               fa.ICON_FA_MUSIC if heard else fa.ICON_FA_WAVE_SQUARE)
-    if imgui.is_item_hovered() and not a:
+    if imgui.is_item_hovered() and not a and not S.auto_buttons:
         imgui.set_tooltip("Right-click: make it move on its own, or follow the music")
     if not imgui.begin_popup_context_item(f"auto_{key}"):
         return
@@ -2323,23 +2332,56 @@ def automation_menu(app, f, key, lo, hi, name):
     imgui.end_popup()
 
 
+def auto_w():
+    """Width kept free at the end of each slider row for its Automate button (0 when the buttons are off)."""
+    return sc(28) + 4 if S.auto_buttons else 0
+
+
+def auto_button(app, f, key, name):
+    """The Automate button at the end of a slider row: opens the slider's automation menu (as right-clicking it
+    does). Dim when the slider is still, lit while it moves on its own (cyan) or follows the music (magenta).
+    Call after automation_menu; pass key=None on rows that can't be automated, to keep the column lined up."""
+    if not S.auto_buttons:
+        return
+    imgui.same_line(0, 4)
+    if key is None:
+        imgui.dummy(V(sc(28), imgui.get_frame_height()))
+        return
+    a = f.autos.get(key)
+    heard = bool(a) and a.get("shape") == 7
+    col = (MAGENTA if heard else CYAN) if a else alpha(DIM, .55)
+    icon = fa.ICON_FA_MUSIC if heard else fa.ICON_FA_WAVE_SQUARE
+    if a:   # a lit button: a soft glow behind the glyph
+        p, h = imgui.get_cursor_screen_pos(), imgui.get_frame_height()
+        imgui.get_window_draw_list().add_rect_filled(p, V(p.x + sc(28), p.y + h), u32(alpha(col, .16)), 3)
+    if a:
+        tip = (f"{name}: follows the music" if heard else f"{name}: moving on its own") + chr(10) + "Click to change it"
+    else:
+        tip = f"Automate {name}: make it move on its own" + chr(10) + "(an LFO in time with the tempo) or follow the music"
+    if icon_button(icon, f"ab_{key}", col, tip, hover_col=col):
+        imgui.open_popup(f"auto_{key}")
+
+
 def effect_body(app, f):
     imgui.spacing()
     label(f.amt_label or "Amount")
+    imgui.set_next_item_width(imgui.get_content_region_avail().x - auto_w())
     _, f.amt = slider_float("##amt", f.amt, 0.0, 1.0, "%.2f")
     automation_menu(app, f, "amt", 0.0, 1.0, f.amt_label or "Amount")
+    auto_button(app, f, "amt", f.amt_label or "Amount")
     if f.mod == MOD_AUDIO:
         listen_controls(app, f)
     label("Opacity")
-    imgui.set_next_item_width(imgui.get_content_region_avail().x - 118)
+    imgui.set_next_item_width(imgui.get_content_region_avail().x - 118 - auto_w())
     _, pct = slider_float("##opacity", f.opacity * 100, 0.0, 100.0, "%.0f%%")
     f.opacity = pct / 100
     automation_menu(app, f, "opacity", 0.0, 1.0, "Opacity")
     imgui.same_line()
-    imgui.set_next_item_width(-1)
+    imgui.set_next_item_width(-1 - auto_w())
     _, f.blend = imgui.combo("##blend", f.blend, E.BLEND_MODES)
     if imgui.is_item_hovered():
         imgui.set_tooltip("Blend mode: how this effect combines with what's under it")
+    auto_button(app, f, "opacity", "Opacity")
     if f.needs_mask:   # eraser and tracers already work from the person mask themselves
         f.target = 0
     else:
@@ -2359,7 +2401,7 @@ def effect_body(app, f):
                               "so cards below it are left out too: tick the first overlay at the bottom.")
     if f.has_centre:
         label("Centre")
-        imgui.set_next_item_width(imgui.get_content_region_avail().x - 64)
+        imgui.set_next_item_width(imgui.get_content_region_avail().x - 64 - auto_w())
         _, f.centre = slider_float2("##centre", f.centre, 0.0, 1.0, "%.2f")
         imgui.same_line(0, 4)
         picking = app.picking is f
@@ -2369,27 +2411,30 @@ def effect_body(app, f):
         imgui.same_line(0, 4)
         if icon_button(fa.ICON_FA_ROTATE_LEFT, "rc", DIM, "Reset to the middle"):
             f.centre = [0.5, 0.5]
+        auto_button(app, f, None, "Centre")
     if f.xform:
         label("Scale")
-        imgui.set_next_item_width(imgui.get_content_region_avail().x - 32)
+        imgui.set_next_item_width(imgui.get_content_region_avail().x - 32 - auto_w())
         _, f.xs = slider_float("##xs", f.xs, 0.1, 8.0, "%.2fx", imgui.SliderFlags_.logarithmic)
         automation_menu(app, f, "xs", 0.1, 8.0, "Scale")
         imgui.same_line(0, 4)
         if icon_button(fa.ICON_FA_ROTATE_LEFT, "rxs", DIM, "Back to normal size"):
             f.xs = 1.0
+        auto_button(app, f, "xs", "Scale")
         label("Rotate")
-        imgui.set_next_item_width(imgui.get_content_region_avail().x - 32)
+        imgui.set_next_item_width(imgui.get_content_region_avail().x - 32 - auto_w())
         _, f.xr = slider_float("##xr", f.xr, -360.0, 360.0, "%.0f deg")
         automation_menu(app, f, "xr", -360.0, 360.0, "Rotate")
         imgui.same_line(0, 4)
         if icon_button(fa.ICON_FA_ROTATE_LEFT, "rxr", DIM, "Back to upright"):
             f.xr = 0.0
+        auto_button(app, f, "xr", "Rotate")
         if imgui.is_item_hovered():
             imgui.set_tooltip("Scale and Rotate turn the effect about its Centre; the picture underneath stays put")
     music_controls(app, f)
     if f.has_speed:
         label("Speed")
-        imgui.set_next_item_width(imgui.get_content_region_avail().x - 32)
+        imgui.set_next_item_width(imgui.get_content_region_avail().x - 32 - auto_w())
         _, f.speed = slider_float("##speed", f.speed, -3.0, 3.0, "%.2fx")
         automation_menu(app, f, "speed", -3.0, 3.0, "Speed")
         if imgui.is_item_hovered():
@@ -2397,10 +2442,13 @@ def effect_body(app, f):
         imgui.same_line(0, 4)
         if icon_button(fa.ICON_FA_ROTATE_LEFT, "rs", DIM, "Back to normal speed"):
             f.speed = 1.0
+        auto_button(app, f, "speed", "Speed")
     for j, (name, _default, lo, hi, fmt) in enumerate(f.params):
         label(name)
+        imgui.set_next_item_width(imgui.get_content_region_avail().x - auto_w())
         _, f.pvals[j] = slider_float(f"##p{j}", f.pvals[j], lo, hi, fmt)
         automation_menu(app, f, f"p{j}", lo, hi, name)
+        auto_button(app, f, f"p{j}", name)
     for j, (name, choices, _default) in enumerate(f.options):
         label(name)
         imgui.begin_disabled(app.midi_learn)
@@ -2493,13 +2541,14 @@ def music_controls(app, f):
                           "Flow: drifts on a clock that speeds up with the music" + chr(10) +
                           "Rhythmic: moves in time with the beat")
     label("Response")
-    imgui.set_next_item_width(imgui.get_content_region_avail().x - 32)
+    imgui.set_next_item_width(imgui.get_content_region_avail().x - 32 - auto_w())
     _, f.mresp = slider_float(f"##mresp{f.uid}", f.mresp, 0.0, 1.0, "%.2f")
     if imgui.is_item_hovered():
         imgui.set_tooltip("How slowly audio-driven settings answer: 0 quick .. 1 slow and smooth")
     imgui.same_line(0, 4)
     if icon_button(fa.ICON_FA_ROTATE_LEFT, f"rm{f.uid}", DIM, "Back to the middle"):
         f.mresp = 0.5
+    auto_button(app, f, None, "Response")
 
 
 def listen_controls(app, f):

@@ -45,7 +45,7 @@ class _ThreadedSource:
         self._thread.start()
 
     def set_crop(self, crop):
-        self.crop = crop
+        self.crop = clean_crop(crop)
         if getattr(self, "_still", None) is not None:   # a still picture only arrives once: send it again
             self._push(self._still)
 
@@ -287,6 +287,24 @@ class ScreenGrabber:
     def close(self):
         self.idle()
         self.mss.close()
+
+
+def clean_crop(crop):
+    """A crop as [x0, y0, x1, y1] inside 0..1 with x0 < x1 and y0 < y1 (at least 1% each way), or None for the
+    whole picture when it's missing or unusable (a saved setup from elsewhere, a slip of the crop tool)."""
+    try:
+        x0, y0, x1, y1 = (float(v) for v in crop)
+    except (TypeError, ValueError):
+        return None
+    if not all(v == v and abs(v) != float("inf") for v in (x0, y0, x1, y1)):
+        return None
+    x0, x1 = sorted((min(1.0, max(0.0, x0)), min(1.0, max(0.0, x1))))
+    y0, y1 = sorted((min(1.0, max(0.0, y0)), min(1.0, max(0.0, y1))))
+    if x1 - x0 < 0.01 or y1 - y0 < 0.01:
+        return None
+    if x0 <= 0.0 and y0 <= 0.0 and x1 >= 1.0 and y1 >= 1.0:
+        return None   # the whole picture: no crop at all
+    return [x0, y0, x1, y1]
 
 
 def crop_frame(frame, crop):

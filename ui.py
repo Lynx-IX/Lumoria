@@ -22,7 +22,7 @@ import audio as A
 from audio import list_inputs
 from segment import QUALITY as SEG_QUALITY
 from shared import (AUTO_OFF, AUTO_PLAYLIST, AUTO_RANDOM, DATA, HERE, LOOK_TRANSITIONS, MOD_AUDIO, MOD_WAVE,
-                    RESOLUTIONS, SOURCE_URL, SUPPORT_URL, TRANSITIONS, VERSION)
+                    RESOLUTIONS, SOURCE_URL, SUPPORT_URL, TRANSITIONS, VERSION, save_json)
 from sources import CameraSource, describe, list_cameras, list_screens, window_label
 
 V = imgui.ImVec2
@@ -189,8 +189,7 @@ def load_layout():
 
 def save_layout():
     try:
-        with open(SETTINGS_FILE, "w") as fh:
-            json.dump({k: getattr(S, k) for k in LAYOUT_DEFAULTS}, fh, indent=1)
+        save_json(SETTINGS_FILE, {k: getattr(S, k) for k in LAYOUT_DEFAULTS})
     except OSError:
         pass
 

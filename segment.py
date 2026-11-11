@@ -25,12 +25,27 @@ class Segmenter:
         self._mask = None                   # finished, not yet collected
         self._reset = False
         self._thread = None
+        self._stop = False
+        self._notice = None                 # a one-off message for the user (a hiccup it recovered from)
+        self.failures = 0                   # inference errors so far (for the self-test and tests)
         self.ratio = QUALITY[1][2]
 
     def start(self):
         if self._thread is None:
             self._thread = threading.Thread(target=self._run, daemon=True)
             self._thread.start()
+
+    def stop(self):
+        """Let the worker finish (Lumoria is closing)."""
+        self._stop = True
+        self._wake.set()
+        if self._thread:
+            self._thread.join(2)
+
+    def take_notice(self):
+        """A message about a problem it recovered from, once."""
+        note, self._notice = self._notice, None
+        return note
 
     def wants_frame(self):
         with self._lock:
@@ -50,25 +65,30 @@ class Segmenter:
         """Forget temporal memory (call when the source changes)."""
         self._reset = True
 
+    def _session(self, gpu=True):
+        import onnxruntime as ort
+        opts = ort.SessionOptions()
+        # the work is on the GPU; by default the CPU helper threads spin while they wait, burning a core
+        opts.intra_op_num_threads = 2
+        opts.add_session_config_entry("session.intra_op.allow_spinning", "0")
+        opts.add_session_config_entry("session.inter_op.allow_spinning", "0")
+        providers = (["DmlExecutionProvider"] if gpu else []) + ["CPUExecutionProvider"]
+        return ort.InferenceSession(self.model_path, sess_options=opts, providers=providers)
+
     def _run(self):
         try:
-            import onnxruntime as ort
-            opts = ort.SessionOptions()
-            # the work is on the GPU; by default the CPU helper threads spin while they wait, burning a core
-            opts.intra_op_num_threads = 2
-            opts.add_session_config_entry("session.intra_op.allow_spinning", "0")
-            opts.add_session_config_entry("session.inter_op.allow_spinning", "0")
-            session = ort.InferenceSession(self.model_path, sess_options=opts,
-                                           providers=["DmlExecutionProvider", "CPUExecutionProvider"])
+            session = self._session()
         except Exception as e:
             self.error = f"Background removal unavailable: {e}"
             return
         empty = [np.zeros((1, 1, 1, 1), np.float32)] * 4
-        rec, size = empty, None
+        rec, size, in_a_row, gpu = empty, None, 0, True
         self.loaded = True
-        while True:
+        while not self._stop:
             self._wake.wait()
             self._wake.clear()
+            if self._stop:
+                break
             with self._lock:
                 frame = self._frame
             if frame is None:
@@ -77,11 +97,27 @@ class Segmenter:
             if self._reset or (frame.shape, ratio) != size:   # recurrent state is tied to the frame size
                 rec, size, self._reset = empty, (frame.shape, ratio), False
             t0 = time.perf_counter()
-            src = (frame.astype(np.float32) / 255.0).transpose(2, 0, 1)[None]
-            out = session.run(None, {"src": src, "r1i": rec[0], "r2i": rec[1], "r3i": rec[2],
-                                     "r4i": rec[3], "downsample_ratio": np.array([ratio], np.float32)})
-            rec = out[2:]
-            mask = (np.clip(out[1][0, 0], 0, 1) * 255).astype(np.uint8)
+            try:
+                src = (frame.astype(np.float32) / 255.0).transpose(2, 0, 1)[None]
+                out = session.run(None, {"src": src, "r1i": rec[0], "r2i": rec[1], "r3i": rec[2],
+                                         "r4i": rec[3], "downsample_ratio": np.array([ratio], np.float32)})
+                rec = out[2:]
+                mask = (np.clip(out[1][0, 0], 0, 1) * 255).astype(np.uint8)
+                in_a_row = 0
+            except Exception as e:   # a hiccup (e.g. the graphics driver reset): start the memory over, carry on
+                self.failures += 1
+                in_a_row += 1
+                rec, mask = empty, None
+                if in_a_row >= 3:    # it keeps failing: build it again, on the CPU if the GPU is the trouble
+                    try:
+                        session, gpu = self._session(gpu=False), False
+                        in_a_row = 0
+                        self._notice = "Background removal had a problem and restarted (now on the CPU, a bit slower)"
+                    except Exception as e2:
+                        self.error, self.loaded = f"Background removal stopped: {e2}", False
+                        return
+                else:
+                    self._notice = f"Background removal had a hiccup and carried on ({type(e).__name__})"
             self.ms = (time.perf_counter() - t0) * 1000
             with self._lock:
                 self._mask, self._frame = mask, None

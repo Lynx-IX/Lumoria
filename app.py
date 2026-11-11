@@ -38,7 +38,8 @@ import ui
 import audio as A
 from audio import AudioAnalyzer, list_inputs
 from shared import (AUTO_OFF, AUTO_PLAYLIST, AUTO_RANDOM, DATA, FROZEN, HERE, LOOK_MORPH, MOD_AUDIO, MOD_OFF, MOD_WAVE,
-                    RESOLUTIONS, TRANSITIONS, VERSION)
+                    RESOLUTIONS, TRANSITIONS, VERSION, save_json, save_text)
+from lookcheck import clean_look, clean_meta, clean_thumb
 from segment import MODEL as SEG_MODEL, QUALITY as SEG_QUALITY, Segmenter
 import midi
 import recorder
@@ -687,6 +688,8 @@ class Pipeline:
         the previous one, so recording never stalls the GPU."""
         W, H = self.size
         if not getattr(self, "out_pbo", None) or self.out_pbo[0].size != W * H * 3:
+            for b in getattr(self, "out_pbo", None) or []:   # a new size: let go of the old pair
+                b.release()
             self.out_pbo, self.out_full = [self.ctx.buffer(reserve=W * H * 3) for _ in range(2)], [False, False]
         ready = np.frombuffer(self.out_pbo[1].read(), np.uint8).reshape(H, W, 3) if self.out_full[1] else None
         self.out.fbo.read_into(self.out_pbo[0], components=3, alignment=1)
@@ -1319,8 +1322,7 @@ class App:
             data = dict(lumoria="look", version=1, **looks[0])
         else:
             data = dict(lumoria="playlist", version=1, looks=looks)
-        with open(path, "w", encoding="utf8") as fh:
-            json.dump(data, fh, indent=1)
+        save_json(path, data)
         return len(looks)
 
     def import_looks(self, path):
@@ -1328,34 +1330,42 @@ class App:
         already taken get a number, so nothing of yours is overwritten. Returns the names added."""
         with open(path, encoding="utf8") as fh:
             data = json.load(fh)
+        if not isinstance(data, dict):
+            raise ValueError("not a Lumoria look or playlist file")
         if data.get("lumoria") == "look":
             looks = [data]
         elif data.get("lumoria") == "playlist":
-            looks = data.get("looks", [])
-        elif "effects" in data:   # a bare look file from a presets folder
+            looks = data.get("looks", []) if isinstance(data.get("looks"), list) else []
+        elif isinstance(data, dict) and "effects" in data:   # a bare look file from a presets folder
             looks = [dict(name=os.path.splitext(os.path.basename(path))[0], look=data, meta={})]
         else:
             raise ValueError("not a Lumoria look or playlist file")
         added = []
         for pkg in looks:
-            look = pkg.get("look")
-            if not isinstance(look, dict) or "effects" not in look:
+            if not isinstance(pkg, dict):
+                continue
+            try:
+                look = clean_look(pkg.get("look"))
+            except ValueError:
+                continue
+            if not look["effects"]:
                 continue
             base = "".join(c for c in str(pkg.get("name", "Look")) if c.isalnum() or c in " -_").strip() or "Look"
             name, k = base, 2
             while os.path.exists(os.path.join(PRESET_DIR, name + ".json")) or name in added:
                 name, k = f"{base} ({k})", k + 1
-            with open(os.path.join(PRESET_DIR, name + ".json"), "w") as fh:
-                json.dump(look, fh, indent=1)
-            if pkg.get("thumb"):
+            save_json(os.path.join(PRESET_DIR, name + ".json"), look)
+            thumb = clean_thumb(pkg.get("thumb"))
+            if thumb:
                 try:
                     with open(self.thumb_path(name), "wb") as fh:
-                        fh.write(base64.b64decode(pkg["thumb"]))
-                except (OSError, ValueError):
+                        fh.write(thumb)
+                except OSError:
                     pass
             self.playlist.append(name)
-            if pkg.get("meta"):
-                self.look_meta[name] = {**self.meta(name), **pkg["meta"]}
+            meta = clean_meta(pkg.get("meta"))
+            if meta:
+                self.look_meta[name] = {**self.meta(name), **meta}
             added.append(name)
         self.save_playlist()
         return added
@@ -1564,8 +1574,7 @@ class App:
 
     def save_midi_map(self):
         try:
-            with open(MIDI_FILE, "w") as fh:
-                json.dump(self.midi_map, fh, indent=1)
+            save_json(MIDI_FILE, self.midi_map)
         except OSError:
             pass
 
@@ -1845,8 +1854,7 @@ class App:
         return [n for n in order if n in on_disk] + [n for n in on_disk if n not in order]
 
     def save_playlist(self):
-        with open(PLAYLIST_FILE, "w") as fh:
-            json.dump(dict(order=self.playlist, meta=self.look_meta), fh, indent=1)
+        save_json(PLAYLIST_FILE, dict(order=self.playlist, meta=self.look_meta))
 
     def meta(self, name):
         """A look's own transition and timing. transition -1 / hold 0 mean 'use the defaults'."""
@@ -1862,8 +1870,7 @@ class App:
             return
         data = dict(version=2, band=self.band, gain=self.gain,
                     effects=[self.item_to_dict(f) for f in self.pipe.order if not f.removing])
-        with open(os.path.join(PRESET_DIR, name + ".json"), "w") as fh:
-            json.dump(data, fh, indent=1)
+        save_json(os.path.join(PRESET_DIR, name + ".json"), data)
         if name not in self.playlist:
             self.playlist.append(name)
             self.save_playlist()
@@ -1913,7 +1920,7 @@ class App:
     def _load_preset(self, name):
         try:
             with open(os.path.join(PRESET_DIR, name + ".json")) as fh:
-                data = json.load(fh)
+                data = clean_look(json.load(fh))
         except (OSError, ValueError) as e:
             self.flash(f"Couldn't load '{name}': {e}")
             return
@@ -2214,8 +2221,7 @@ class App:
         if text == self.session_text:
             return
         try:
-            with open(os.path.join(PRESET_DIR, "_session.json"), "w") as fh:
-                fh.write(text)
+            save_text(os.path.join(PRESET_DIR, "_session.json"), text)
             self.session_text = text
         except OSError:
             pass
@@ -2226,6 +2232,12 @@ class App:
                 data = json.load(fh)
         except (OSError, ValueError):
             return
+        if not isinstance(data, dict):
+            return
+        try:
+            data.update(clean_look(data))   # the effects part is a look: checked the same way
+        except ValueError:
+            data["effects"] = []
         if self.unclean:   # maybe this setup is what crashed it: ask first (the UI shows the question)
             self.held_session = data
         else:
@@ -2274,7 +2286,13 @@ class App:
         by_id = {f.id: f for f in self.pipe.effects}
         entries = self.look_entries(data)
         used = set()
-        chain = [it for it in (self.item_from_dict(e, by_id, used) for e in entries) if it]
+
+        def build(e):
+            try:
+                return self.item_from_dict(e, by_id, used)
+            except Exception:   # something in this entry Lumoria can't use: leave it out, keep the rest
+                return None
+        chain = [it for it in (build(e) for e in entries) if it]
         for f in used:   # effects the new look reuses leave wherever they were in the old chain
             if (old := self.pipe.container_of(f)) is not None:
                 old.remove(f)
@@ -2282,7 +2300,9 @@ class App:
         for f in leaving:
             self.remove_effect(f)
         self.pipe.order = chain + leaving   # leaving ones fade out at the bottom, then drop
-        self.band, self.gain = data.get("band", self.band), data.get("gain", self.gain)
+        band = data.get("band", self.band)
+        self.band = band if band in A.SOURCE_KEYS else self.band
+        self.gain = float(data.get("gain", self.gain))
 
     # --- per frame
     def mask_needed(self):
@@ -2382,6 +2402,9 @@ class App:
         if seg.error and not self.seg_error_shown:
             self.flash(seg.error, 10)
             self.seg_error_shown = True
+        note = seg.take_notice()
+        if note:
+            self.flash(note, 6)
         if (mask := seg.take_mask()) is not None:
             self.pipe.upload_mask(mask)
             self.last_mask = mask
@@ -2497,18 +2520,21 @@ class App:
             if self.spout.error:
                 self.flash(f"Spout stopped: {self.spout.error}", 8)
                 self.toggle_spout(False)
-        if self.recorder.ready:   # a copy of the output, read back without waiting for the GPU
-            frame = self.pipe.read_out_async()
-            if frame is not None:
-                self.recorder.push(frame, t)
+        # the recording and the virtual camera share one copy of the output, read back without waiting for the
+        # GPU (it arrives a frame late, which nobody can see; waiting for it could stall the whole frame)
+        cam_due = self.vcam is not None and t - self.vcam_last >= 1 / VCAM_FPS - 0.002
+        frame = self.pipe.read_out_async() if (self.recorder.ready or cam_due) else None
+        if self.recorder.ready and frame is not None:
+            self.recorder.push(frame, t)
         err = self.recorder.failed()
         if err:
             self.audio.tap = None
             self.flash(err, 6)
 
-        if self.vcam and t - self.vcam_last >= 1 / VCAM_FPS - 0.002:
+        if cam_due:
             self.vcam_last = t
-            self.vcam.send(self.pipe.read_rgb())
+            if frame is not None:
+                self.vcam.send(frame)
 
         if t - self.code_check_t > 2.0:
             self.code_check_t = t
@@ -2801,6 +2827,8 @@ def main():
             app.spout.close()   # unlists "Lumoria" so receivers don't wait for it
         if app.vcam:
             app.vcam.close()
+        if app.segmenter:
+            app.segmenter.stop()   # let the background-removal worker finish cleanly
         impl.shutdown()
         glfw.terminate()
     if app.restart_requested:  # relaunch with the updated code (camera and windows are released above)

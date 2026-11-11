@@ -10,9 +10,14 @@ your music, and sends the result to OBS (Spout, window capture or the OBS Virtua
 file. Build looks, line them up in a playlist and fire them live, on the beat.
 
 ## Features
-- **63 GPU effects**: neon edges, kaleidoscope, mirror slice, pixel sort, stained glass, oil paint, tiny planet,
+- **74 GPU effects**: neon edges, kaleidoscope, mirror slice, pixel sort, stained glass, oil paint, tiny planet,
   glitch, datamosh, tracers, time grid, film looks, colour grading, visualizers and more, stacked in any order,
-  each set to manual, audio-reactive or a wave.
+  each with its own music switch.
+- **3D worlds**: fly endlessly through fractals (Menger sponge, Mandelbulb, Mandelbox, Apollonian lace...), down
+  infinite halls of arches, columns or visionary alcoves with you in them, through shattering glass, a spectrum
+  city, liquid metal and more, all lit, fogged and moving with the music.
+- **Automation on any slider**: waves, endless Spin, an Intro that glides in when a look starts and then keeps
+  moving, positions that float, drift or hop on the beat, or follow any part of the sound.
 - **AI person cut-out** (Robust Video Matting on the GPU): put effects on you, on the background or both; erase
   or replace the background; cut people out of several sources onto one scene.
 - **Interactive effects** that react to your movement: smoke, flames, water ripples, light painting, settling
@@ -28,6 +33,8 @@ file. Build looks, line them up in a playlist and fire them live, on the beat.
   window capture, the OBS Virtual Camera, and recording to MP4 / MOV with sound on the graphics card's encoder.
 - **Made for performing**: MIDI learn for any control, undo / redo, crash recovery, themes and a console-style
   interface.
+
+![3D effects: Mandelbulb, an endless Menger sponge dive, the Visionary hall and the Colonnade](docs/screenshot-3d.jpg)
 
 ![The Kaleido Dream look](docs/screenshot-kaleido.png)
 
@@ -69,7 +76,8 @@ They live in `samples/`; the welcome (Settings > About > Show the welcome again)
   fullscreen, Virtual cam and the theme palette.
 - **Sidebar:** Input, Audio, Effects, Transitions, Output.
 - **Effects:** *+ Add effect* opens the library (searchable, grouped). Each effect in the chain is a card:
-  drag the grip to reorder, power to bypass, the mode icon cycles **manual → audio → wave**,
+  drag the grip to reorder, power to bypass, the **music note** turns listening on (lit) or off (dim; off, the
+  music doesn't touch the effect at all),
   the arrow opens its settings (amount, opacity, blend mode, centre, speed and its own options), × removes it.
   The ⧉ button (or right-click > *Duplicate*) adds an independent copy ("Neon Edges 2") with the same settings,
   e.g. to run one effect on the subject and a differently set copy on the background. Copies save with looks.
@@ -124,14 +132,15 @@ set of shapes and renders them as `assets/*_neon.*`. The original artwork keeps 
 Pick an input under *Audio* (it's remembered for next time). To follow music playing on the PC, pick an output
 under *What you hear* at the bottom of the list (Windows' default output first): Lumoria listens to what that device
 plays, like OBS's Desktop Audio, with no extra software. A loopback input (e.g. *Loopback Mix (MOTU M Series)* or
-a Voicemeeter Out) works too. Effects set to **audio** follow the chosen band; recordings take their sound from
-the same input.
+a Voicemeeter Out) works too. Effects with their **music note** lit follow the chosen band; recordings take their
+sound from the same input. Audio and 3D effects choose what the music does in their own settings (*Breaks on*,
+*Music moves*...), so those settings work whether the note is lit or not.
 Beat effects (Glitch *On the beat*, Bubbles *Pop on beat*, Datamosh *On the beat*, visualizer rings, Neon
 Shapes' beat pulse, *Audio* colour motion) follow the bass beat; with no input they tick at 120 BPM.
 
 ## Audio on any slider
-Right-click any slider on an effect card (Amount, Opacity, Speed and every effect-specific slider) and choose
-*Shape: Audio* to make it follow the music; it shows a music note beside it. The menu has:
+Click the wave button at the end of any slider's row (or right-click the slider) and choose *Shape: Audio* to make
+it follow the music; the button lights magenta. The menu has:
 - **Listens to:** Bass / Mids / Highs / All, the drums (Kick, Snare, Hats, Big kicks), the tempo Beat, or a
   **frequency range** you pick on the live spectrum (e.g. only the vocals).
 - **Slow and stereo measures** (for subtle, always-moving influence, alongside the drum hits): *Energy* (slow
@@ -157,6 +166,16 @@ Overlay effects (Light Rays, Light Leaks, Bubbles, Neon Shapes, Audio Visualizer
 **Scale** and **Rotate** about their Centre; the picture underneath stays put.
 Every wide slider also has a number box beside it for typing an exact value (Settings > Interface > Number boxes).
 
+## Automation: sliders that move on their own
+The same wave button (lit cyan while it moves) offers, besides Audio:
+- **Waves:** Sine, Triangle, Ramp up / down, Square, Random steps, Smooth random, every so many seconds, beats or bars.
+- **Spin:** keeps going one way forever. On *Rotate* it turns in whole turns without ever jumping back.
+- **Intro:** when the effect comes on (or its look loads) it glides *From* → *To* over the time you set, with an ease;
+  then it holds, or hands over to a wave between *To* and *Then to*. Shard Storm shattering out of the picture and
+  staying broken is an Intro on *Scatter*.
+- **Floating position:** on the *Centre* of any effect that has one: Drift, Orbit, Figure 8, Bounce or Hop on the
+  beat, with a size and speed. Moving the Centre by hand moves the point it floats round.
+
 ## Tempo
 One beat clock drives beat effects, auto-play and look timing (Settings > Tempo; live in the playlist bar).
 Source: **Audio** (follows the bass, steady through quiet parts), **Tap** (`T`, the TAP button or a MIDI pad),
@@ -168,7 +187,7 @@ bar) makes a fired look wait for the next beat or bar, with a countdown on its t
 ## Mirror Slice
 Mirrors the picture (left-right, up-down or both, as a 2x2 grid), cuts it into strips and lays them outside-in
 (1, last, 2, second-to-last...), first across, then down: a live version of the Mirror Slice image tool. *Columns*
-and *Rows* (2-120) set the strips, *Density* scales both (so audio or wave mode makes it breathe), *Gaps* draws
+and *Rows* (2-120) set the strips, *Density* scales both (so the music switch or an automation makes it breathe), *Gaps* draws
 dark lines between strips. *Slice* can cut up the whole picture, only you (over the picture or over black; with a
 captured background the unsliced you is erased underneath) or only the background while you stay whole.
 *Motion*: still, a new density on every beat, or drifting cut lines (Speed).
@@ -176,7 +195,7 @@ captured background the unsliced you is erased underneath) or only the backgroun
 ## Person effects (Cutout)
 Built on the AI mask:
 - **Echo Clones:** copies of you a little further back in time each, beside you (both sides, right, left) or
-  behind you shrinking into the distance. *Spacing* (the main slider; audio or wave mode makes the line breathe),
+  behind you shrinking into the distance. *Spacing* (the main slider; the music switch or an automation makes the line breathe),
   *Copies* (1-7), *Delay*, *Fade*, *Tint* with any palette.
 - **Hologram:** you as a tinted, scanlined projection with flicker, glitch tears, a glowing edge and a projector
   beam (drag the centre point to move its base). *Behind you*: the room (the captured background if there is one),
@@ -213,7 +232,26 @@ cut-out, and each has its own palette and colour motion:
   colour, Busyness stirs it, the Pan leans it left or right, and every kick flares it (curtains, nebula or ribbons).
 
 All of them answer to *Hit sensitivity* and the audio input chosen on the Audio card, and their sliders can follow
-the sound too (right-click a slider).
+the sound too (the wave button at the end of a slider's row).
+
+## 3D effects
+The *3D* category builds real 3D scenes with depth, lighting, fog and a moving camera. Each has Centre, Scale and
+Rotate to place it, and the raymarched ones have *Smoothing* (Off, 2x, 4x or Over time) to keep fine detail from
+shimmering. What the music does is chosen in each effect's own settings, off by default except where it's the point.
+- **Fractal Flight:** Sponge tunnels, Menger cube, Mandelbox, Mandelbulb, Octahedral sponge, Kaleido star,
+  Apollonian lace and Crystal lattice, flown through, orbited, drifted or dived into. *Dive in* on the sponges is an
+  endless fall down a tunnel that keeps opening into smaller tunnels. *Variation* and *Morph* turn the folds steadily
+  one way and come back round to the start, so they can spin forever; *Dance* makes the small forms ripple like
+  vibrated ferrofluid; your picture can cover the walls.
+- **Infinite Halls:** arches, a square tunnel, a Roman colonnade in every direction, or a visionary hall of nested
+  arches with you in glowing alcoves; walls of your picture, marble, gold, eye cells, squiggles or chrome hex; a
+  doorway at the far end looking out into your picture.
+- **Shard Storm:** the picture as a pane of glass, whole at rest, cracking and breaking out on the kicks and
+  settling back (shatter, vortex, warp stream or swarm).
+- **Spectrum City:** the last few seconds of the music as a lit city of bars, a circle, or a valley you look down.
+- **Picture Object:** a cube, sphere, torus, any of the five platonic solids or a twisted pillar, wrapped in your
+  picture, a window onto it, chrome or glass, over a mirror or neon floor.
+- **Liquid Metal, Pin Field 3D, Voxel You, Flip Wall, Warp Tunnel, Picture Orb.**
 
 ## Interactive effects
 The *Interactive* category reacts to you, through the AI mask (Source: Person) or anything moving in the
@@ -267,6 +305,10 @@ python -m venv .venv
 desktop icon, uninstaller; no admin needed). The version is `VERSION` in `shared.py`. The installed app keeps
 looks, settings and MIDI links in `%APPDATA%\Lumoria` (kept on uninstall). Check a build with `Lumoria.exe --selftest`: it runs a few seconds with the AI mask, an effect and Spout
 on, writes `%TEMP%\LumoriaSelftest\selftest.json`, and quits, without touching your own looks.
+
+Tests: `.venv\Scripts\python -m unittest discover tests` runs the automated checks (safe saving, look and playlist
+imports including damaged and hostile files, crop cleaning, background removal recovering from errors). They run on
+a throwaway data folder, never your own looks.
 
 ## License
 Lumoria is open source under the [GNU General Public License v3.0](LICENSE): you can use it, share it, change

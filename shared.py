@@ -5,7 +5,7 @@ import sys
 # Installed (Lumoria.exe, built with PyInstaller): built-in files (assets, models) sit in the app's own folder,
 # which may be read-only (Program Files), so looks, settings, MIDI links and logs live in %APPDATA%\Lumoria.
 # Run from source: both are this folder.
-VERSION = "0.9.1"   # Lumoria's version (build.py reads it from here for the installer)
+VERSION = "0.10.0"   # Lumoria's version (build.py reads it from here for the installer)
 SOURCE_URL = "https://github.com/Lynx-IX/Lumoria"   # Settings > About links to it
 SUPPORT_URL = ""     # a tip / support page (Ko-fi); Settings > About shows a Support button once set
 FROZEN = getattr(sys, "frozen", False)
@@ -16,7 +16,9 @@ if "--selftest" in sys.argv:   # the build check runs on a throwaway data folder
     DATA = os.path.join(tempfile.gettempdir(), "LumoriaSelftest")
 os.makedirs(DATA, exist_ok=True)
 RESOLUTIONS = [("1280 x 720", 1280, 720), ("1920 x 1080", 1920, 1080),
-               ("1080 x 1920  vertical", 1080, 1920), ("1080 x 1080  square", 1080, 1080)]
+               ("1080 x 1920  vertical", 1080, 1920), ("1080 x 1080  square", 1080, 1080),
+               ("2560 x 1440  (1440p)", 2560, 1440), ("3840 x 2160  (4K)", 3840, 2160),
+               ("2160 x 3840  4K vertical", 2160, 3840)]
 MOD_OFF, MOD_AUDIO, MOD_WAVE = 0, 1, 2            # what drives an effect's amount
 AUTO_OFF, AUTO_PLAYLIST, AUTO_RANDOM = 0, 1, 2    # auto-play modes
 TRANSITIONS = ["Dissolve", "Grow", "Cut"]                          # effects fading in/out

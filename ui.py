@@ -106,6 +106,19 @@ MOD_COLS = (DIM, MAGENTA, VIOLET)
 MOD_TIPS = ("Manual: the amount stays where you set it", "Audio: the amount follows the music",
             "Wave: the amount swells up and down automatically")
 
+
+def music_toggle(f):
+    """The effect's music switch: a note, lit when it listens. Off, the music doesn't touch it at all."""
+    on = f.mod == MOD_AUDIO
+    if on:
+        tip = "Listening to the music: its amount follows the sound,\nand any ways it moves with the music are on.\nClick to stop"
+    elif f.always_hears:
+        tip = "Its amount stays where you set it. Its own music\nsettings still listen. Click to make the amount follow the music too"
+    else:
+        tip = "Not listening: the music doesn't touch this effect.\nClick to make it follow the music"
+    if icon_button(fa.ICON_FA_MUSIC, "mod", MAGENTA if on else alpha(DIM, .4), tip):
+        f.mod = MOD_OFF if on else MOD_AUDIO
+
 TOPBAR_H, PLAYLIST_SHUT_H, LABEL_W, GAP = 54, 52, 96, 6   # GAP: draggable seam between panels
 SETTINGS_FILE = os.path.join(DATA, "ui_settings.json")
 LAYOUT_DEFAULTS = dict(sidebar_w=410.0, playlist_h=196.0, playlist_open=True, scale=1.0, card_cols=0,
@@ -1766,8 +1779,7 @@ def outline_row(app, f, key, container, depth):
                 imgui.set_tooltip("Mostly hidden by a later effect: open it for details")
     imgui.same_line()
     if not group:
-        if icon_button(MOD_ICONS[f.mod], "mod", MOD_COLS[f.mod], MOD_TIPS[f.mod] + "\n(click to cycle)"):
-            f.mod = (f.mod + 1) % 3
+        music_toggle(f)
         imgui.same_line()
     if icon_button(fa.ICON_FA_THUMBTACK, "pin", AMBER if pinned else alpha(DIM, .45),
                    "Pinned: stays open while you open others (click to unpin)" if pinned
@@ -2030,8 +2042,7 @@ def effect_card(app, f, i, container):
     imgui.pop_font()
     imgui.pop_style_color(3)
     imgui.same_line()
-    if icon_button(MOD_ICONS[f.mod], "mod", MOD_COLS[f.mod], MOD_TIPS[f.mod] + "\n(click to cycle)"):
-        f.mod = (f.mod + 1) % 3
+    music_toggle(f)
     imgui.same_line()
     if icon_button(fa.ICON_FA_CLONE, "dup", DIM, "Duplicate: add a copy with the same settings,\n"
                    "to change separately (e.g. one on the subject, one on the background)"):
@@ -2338,6 +2349,12 @@ def automation_menu(app, f, key, lo, hi, name):
                 imgui.same_line(0, 6)
                 if imgui.button("Replay", V(sc(84), 0)):
                     f.intro_reset = True
+                label("Then")
+                imgui.set_next_item_width(w)
+                _, a["then"] = imgui.combo("##athen", a.get("then", 0), app.INTRO_THEN)
+                if imgui.is_item_hovered():
+                    imgui.set_tooltip("Once it arrives at To: hold there, or keep moving as a wave\n"
+                                      "between To and Then to (starting from where the intro landed)")
             else:
                 label("Phase")
                 imgui.set_next_item_width(w)
@@ -2349,6 +2366,18 @@ def automation_menu(app, f, key, lo, hi, name):
             label("To")
             imgui.set_next_item_width(w)
             _, a["hi"] = slider_float("##ahi", a["hi"], lo, hi, "%.2f")
+        if shape == 9 and a.get("then", 0):
+            label("Then to")
+            imgui.set_next_item_width(w)
+            _, a["then_to"] = slider_float("##athento", a.get("then_to", a["hi"]), lo, hi, "%.2f")
+            label("Every")
+            imgui.set_next_item_width(w - sc(156))
+            a.setdefault("then_unit", 1)
+            r_lo, r_hi, fmt = AUTO_RATES[a["then_unit"]]
+            _, a["then_rate"] = slider_float("##athenrate", a.get("then_rate", 1.0), r_lo, r_hi, fmt,
+                                             imgui.SliderFlags_.logarithmic)
+            imgui.same_line(0, 6)
+            a["then_unit"] = segmented("athenunit", tempo.UNITS, a["then_unit"], VIOLET, sc(150))
         if shape == 8 and key != "xr":
             imgui.text_colored(DIM, "Runs From -> To, then starts over: seamless when\nboth ends look the same (angles, hues).")
         imgui.text_colored(DIM, "Saved with the look. Morph transitions pause it while they slide.")

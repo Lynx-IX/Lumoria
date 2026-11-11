@@ -89,14 +89,13 @@ float asp3(){ return u_res.x/u_res.y; }
 float h1(float n){ return fract(sin(n*12.9898 + 4.1414)*43758.5453); }
 vec3 h3(float n){ return vec3(h1(n), h1(n + 17.17), h1(n + 41.31)); }
 // where the camera is: mode = CAMERAS index, tilt / zoom 0..1, dist = the effect's natural distance.
-// The kick nudges it in a little (scaled by Amount), so the whole world punches with the music.
 vec3 camEye(int mode, float tilt, float zoom, float dist){
   float t = u_time;
   float yaw = mode == 0 ? sin(t*.25)*.75 : mode == 1 ? t*.3 : mode == 3 ? sin(t*.31)*.18 + sin(t*.83)*.05 : 0.;
   float pitch = mix(-.15, 1.25, tilt);
   if (mode == 3) pitch += sin(t*.47)*.06 + sin(t*1.13)*.02;
   if (mode == 4) pitch = mix(.05, 1.3, .5 + .5*sin(t*.2));
-  float d = dist*mix(1.7, .5, zoom)*(1. - u_hits.x*.05*clamp(u_amt, 0., 1.5));
+  float d = dist*mix(1.7, .5, zoom);
   return d*vec3(sin(yaw)*cos(pitch), sin(pitch), cos(yaw)*cos(pitch));
 }
 mat4 persp3(float fovy, float aspect, float n, float f){ float k = 1./tan(fovy*.5);
@@ -186,9 +185,10 @@ vec3 over3d(int bgMode, float glow){
 """
 
 RAY3D = """
+vec2 rayJit = vec2(0.);   // where in the pixel this ray goes (in pixels), for smoothing
 // a camera ray for pixel v_uv from eye toward at (fov in radians)
 vec3 rayDir(vec3 eye, vec3 at, float fov){
-  vec2 su = xfLin3(v_uv*2. - 1. - (u_centre*2. - 1.), -1.)*.5 + .5;   // undo Scale / Rotate / Centre
+  vec2 su = xfLin3((v_uv + rayJit/u_res)*2. - 1. - (u_centre*2. - 1.), -1.)*.5 + .5;   // undo Scale / Rotate / Centre
   vec2 q = (su - .5)*vec2(asp3(), -1.);
   vec3 z = normalize(at - eye), x = normalize(cross(z, vec3(0., 1., 0.))), y = cross(x, z);
   return normalize(z + (q.x*x + q.y*y)*2.*tan(fov*.5));
@@ -235,7 +235,7 @@ void main(){
   float h = u_opt0 == 0 ? l : u_opt0 == 1 ? 1. - l : u_opt0 == 2 ? maskAt(uv)
           : u_opt0 == 3 ? spectrum(abs(uv.x - .5)*1.8)*(1. - abs(uv.y - .5))
           : .5 + .5*sin(length((uv - .5)*vec2(asp3(), 1.))*16. - u_time*3.);
-  h = h*u_amt*.8 + (u_hits.x*.08 + u_hits.y*.04)*r*u_amt;
+  h = h*u_amt*.8 + (u_opt0 == 3 ? (u_hits.x*.08 + u_hits.y*.04)*r*u_amt : 0.);   // hits: only when pushed by Music
   float cell = 1./float(gh), thick = cell*mix(.25, 1.05, u_p2);
   vec3 lp = in_pos;
   vec3 p = picPlane(uv) + vec3(lp.xy*thick, (lp.z + .5)*max(h, .004));
@@ -251,8 +251,8 @@ void main(){ o = vec4(over3d(u_opt2, u_p3*1.6), 1.); }"""),
 
     # Shard Storm: the picture as a pane of glass. At rest it IS the picture; the hits crack it, then blow the
     # pieces out of it (shatter, vortex, warp stream or swarm), and they settle back in as the hit fades.
-    dict(id="shards3d", name="Shard Storm", amt=.12, amt_label="Scatter", speed=True,
-         params=[("Tilt", .25), ("Zoom", .5), ("Burst", .7), ("Spin", .5), ("Glow", .45)],
+    dict(id="shards3d", name="Shard Storm", amt=0., amt_label="Scatter", speed=True,
+         params=[("Tilt", .25), ("Zoom", .5), ("Burst", .55), ("Spin", .5), ("Glow", .45), ("Settle", .4)],
          options=[("Motion", ["Shatter", "Vortex", "Warp stream", "Swarm"], 0),
                   ("Breaks on", ["Kick", "Snare / clap", "Big kicks", "Any hit", "Never"], 0),
                   ("Colour", PALETTES, SRC),
@@ -278,8 +278,12 @@ vec2 crackPt(int i, int j, int gw, int gh){
   if (j == 0 || j == gh) jit.y = 0.;
   return (g + jit)/vec2(gw, gh);
 }
-float shHit(){ return u_opt1 == 0 ? u_hits.x : u_opt1 == 1 ? u_hits.y : u_opt1 == 2 ? u_hits.w
-                    : u_opt1 == 3 ? max(max(u_hits.x, u_hits.y), u_hits.w) : 0.; }
+// the chosen hit, stretched: thrown out at once, drifting back over about a second (Settle: how long)
+float shHit(){
+  float h = u_opt1 == 0 ? u_hits.x : u_opt1 == 1 ? u_hits.y : u_opt1 == 2 ? u_hits.w
+          : u_opt1 == 3 ? max(max(u_hits.x, u_hits.y), u_hits.w) : 0.;
+  return max(pow(h, mix(1.6, .25, u_p5)) - .15, 0.)/.85;
+}
 void main(){
   int gh = shRows(), gw = u_opt5 == 0 ? int(float(gh)*2.25) : int(float(gh)*asp3() + .5);
   if (gl_InstanceID >= gw*gh*2) { """ + HIDE + """ }
@@ -296,8 +300,8 @@ void main(){
   vec3 r = h3(id*1.618 + 3.), home = picPlane(cu);
   vec2 fromMid = (cu - .5)*vec2(asp3(), 1.);
   float hit = shHit()*u_p2;
-  // how broken this piece is: Scatter, plus the hit (pieces near the middle go first)
-  float b = clamp(u_amt, 0., 1.5) + hit*hit*(1.25 - length(fromMid)*.5)*(.6 + .4*r.x);
+  // how broken this piece is: Scatter, plus the hit (pieces near the middle go furthest)
+  float b = clamp(u_amt, 0., 1.5) + hit*(1.35 - length(fromMid)*.5)*(.6 + .4*r.x);
   float mv = smoothstep(.05, 1., b);     // below ~.05 it only cracks
   float t = u_time;
   vec3 dir = normalize(vec3(fromMid*1.3 + (r.xy - .5)*.5, .3 + r.z*.5));
@@ -363,14 +367,15 @@ void main(){
 void main(){
   float hit = u_opt1 == 0 ? u_hits.x : u_opt1 == 1 ? u_hits.y : u_opt1 == 2 ? u_hits.w
             : u_opt1 == 3 ? max(max(u_hits.x, u_hits.y), u_hits.w) : 0.;
-  float b = clamp(u_amt, 0., 1.5) + hit*hit*u_p2;   // no glow while the picture is whole
+  hit = max(pow(hit, mix(1.6, .25, u_p5)) - .15, 0.)/.85;
+  float b = clamp(u_amt, 0., 1.5) + hit*u_p2;   // no glow while the picture is whole
   o = vec4(over3d(u_opt3, u_p4*1.8*smoothstep(.03, .4, b)), 1.);
 }"""),
 
     # Voxel You: you, rebuilt from cubes (AI mask), standing out in relief and bursting apart on the hits.
     dict(id="voxels3d", name="Voxel You", amt=.5, amt_label="Depth", speed=True, mask=True,
          params=[("Tilt", .15), ("Zoom", .5), ("Burst", .5), ("Cube size", .85), ("Glow", .25)],
-         options=[("Bursts on", ["Kick", "Snare / clap", "Big kicks", "Any hit", "Never"], 0),
+         options=[("Bursts on", ["Kick", "Snare / clap", "Big kicks", "Any hit", "Never"], 4),
                   ("Colour", PALETTES, SRC),
                   ("Background", BACKGROUNDS, 4),
                   ("Camera", CAMERAS, 0),
@@ -487,7 +492,9 @@ void main(){
   int i = gl_InstanceID % nb, k = gl_InstanceID / nb;
   if (k >= nr) { """ + HIDE + """ }
   float x = (float(i) + .5)/float(nb), z = (float(k) + .5)/float(nr);
-  float v = pow(clamp(texture(u_s0, vec2(x, z)).r, 0., 1.2), 1.6);   // quiet bands stay low, loud ones tower
+  // Mirror valley: the spectrum mirrored about the middle, bass on the outside walls, highs down the floor
+  float xs = u_opt0 == 2 ? 1. - abs(x - .5)*2. : x;
+  float v = pow(clamp(texture(u_s0, vec2(xs, z)).r, 0., 1.2), 1.6);   // quiet bands stay low, loud ones tower
   float wave = u_hits.x*exp(-z*6.)*.8 + u_hits.y*exp(-z*10.)*.4;     // the kick lifts the front rows
   float h = v*(1. + wave)*u_amt*1.05 + .006;
   vec3 base;
@@ -501,18 +508,29 @@ void main(){
   } else {
     base = vec3((x - .5)*2.6, 0., z*2.6 - 1.4);
     lp.xz *= vec2(2.6/float(nb), 2.6/float(nr))*w;
-    if (u_opt0 == 2) h *= .4 + 1.4*abs(x - .5);   // a valley: the walls rise toward the sides
+    if (u_opt0 == 2) {   // a valley: the ground curves up into walls, and the bars on them stand taller
+      float side = abs(x - .5)*2.;
+      base = vec3((x - .5)*2.2, side*side*.55, .8 - z*4.6);   // newest just ahead, rolling away
+      lp.xz *= vec2(1., 1.55);
+      h *= .5 + 1.3*side;
+    }
   }
   vec3 wp = base + vec3(lp.x, (lp.y + .5)*h, lp.z);
-  vec3 col = palCycle(u_opt1, x*.8 + v*.4 + u_time*.03, vec3(v))*(.25 + 1.1*v);
+  vec3 col = palCycle(u_opt1, xs*.8 + v*.4 + u_time*.03, vec3(v))*(.25 + 1.1*v);
   float up = lp.y + .5;
   col *= mix(.3, 1., up);
   col *= 1. - z*.55;   // older sound fades
   vec3 eye = camEye(u_opt3, u_p0, u_p1, 2.5) + vec3(0., .1, 0.);
+  vec3 look = vec3(0., .15, 0.);
+  if (u_opt0 == 2) {   // low in the valley, looking down it as the sound rolls away
+    float sw = u_opt3 == 2 ? 0. : 1.;
+    eye = vec3(sin(u_time*.17)*.18*sw, mix(.12, .7, u_p0) + sin(u_time*.23)*.04*sw, mix(2.1, 1.1, u_p1));
+    look = vec3(sin(u_time*.11)*.25*sw, .1, -1.5);
+  }
   v_p = wp; v_n = in_nrm; v_e = eye; v_uv = vec2(x, z);
   // rooftops glow (brighter on the hits); the sides stay mostly lit, not glowing
   v_c = vec4(col, (v + wave*.6)*u_p3*.8*pow(up, 4.)); v_x = vec4(0., 0., 0., .4);
-  gl_Position = project3(wp, eye, vec3(0., .15, 0.));
+  gl_Position = project3(wp, eye, look);
 }""", count=64 * 48),
          code="""
 void main(){ o = vec4(over3d(u_opt2, u_p3*1.8), 1.); }"""),
@@ -524,7 +542,8 @@ void main(){ o = vec4(over3d(u_opt2, u_p3*1.8), 1.); }"""),
                   ("Colour", PALETTES, 5),
                   ("Background", BACKGROUNDS, 1),
                   ("Steer", ["Straight", "Sway", "Roll", "Corkscrew"], 1),
-                  ("Detail", DETAIL, 1)],
+                  ("Detail", DETAIL, 1),
+                  ("Music moves", ["Nothing", "Speed and flashes"], 0)],
          mesh=_mesh("box", """
 uniform float u_fog;
 void main(){
@@ -534,7 +553,8 @@ void main(){
   vec3 r = h3(id);
   float t = u_time;
   // travel: Speed (amount) plus the bass pushing; z runs from far away to just behind the camera
-  float travel = t*(.15 + u_amt*.9) + u_music.x*.05;
+  bool mus = u_opt5 == 1;
+  float travel = t*(.15 + u_amt*.9) + (mus ? u_music.x*.05 : 0.);
   float z01 = fract(r.z + travel*(.6 + r.x*.4));
   float z = mix(-28., 2.5, z01);
   float ang = r.x*2.*PI, rad;
@@ -542,7 +562,7 @@ void main(){
   else if (u_opt0 == 1) rad = .15 + r.y*3.;
   else if (u_opt0 == 2) { ang = r.x*2.*PI + z*.35; rad = 1.2 + sin(r.x*6.*PI)*.15; }
   else { ang = r.x*2.*PI; rad = 1.3; z = floor(z*1.5)/1.5; }
-  rad *= 1. + u_hits.x*.12*u_amt;
+  rad *= 1. + (mus ? u_hits.x*.12*u_amt : 0.);
   vec2 xy = vec2(cos(ang), sin(ang))*rad;
   float len = mix(.05, 1.4, u_p0)*(.4 + u_amt*1.4)*(u_opt0 == 3 ? .05 : 1.);
   float wid = mix(.004, .03, u_p1)*(u_opt0 == 3 ? 3. : 1.);
@@ -559,7 +579,7 @@ void main(){
   vec3 col = u_opt1 == """ + str(SRC) + """ ? src*1.6 + .05 : palCycle(u_opt1, r.y*.6 + z01*.4 + t*.05, src);
   float fade = smoothstep(0., .25, z01)*smoothstep(1., .9, z01);
   v_p = wp; v_n = in_nrm; v_e = eye; v_uv = suv;
-  v_c = vec4(col, (.45 + u_hits.x*.6)*fade*(u_opt0 == 3 ? .25 : 1.)); v_x = vec4(0.);   // rings are much bigger
+  v_c = vec4(col, (.45 + (mus ? u_hits.x*.6 : 0.))*fade*(u_opt0 == 3 ? .25 : 1.)); v_x = vec4(0.);   // rings are much bigger
   gl_Position = project3(wp, eye, vec3(sway, 0., -10.));
 }""", frag=GLOW_FRAG, count=18000, blend="add"),
          code="""
@@ -739,7 +759,7 @@ void main(){
     } else {             // neon grid
       vec2 g = abs(fract(fp.xz*2.) - .5);
       float line = smoothstep(.05, 0., min(g.x, g.y));
-      col = back*.3 + palCycle(u_opt5, fp.x*.15 + u_time*.05, back)*line*(1. + u_hits.x);
+      col = back*.3 + palCycle(u_opt5, fp.x*.15 + u_time*.05, back)*line;
     }
     col = mix(col, back, smoothstep(2., 9., tf));
   } else col = bg3d(u_opt3, v_uv);
@@ -750,7 +770,7 @@ void main(){
     # Liquid Metal: blobs of chrome (or gold, glass...) that merge and part, swelling with the bass and
     # rippling on the hits. Chrome reflects the picture.
     dict(id="metal3d", name="Liquid Metal", amt=.5, amt_label="Size", speed=True,
-         params=[("Blend", .55), ("Ripple", .6), ("Glow", .3), ("Tilt", .2), ("Zoom", .5)],
+         params=[("Blend", .55), ("Music ripple", 0.), ("Glow", .3), ("Tilt", .2), ("Zoom", .5)],
          options=[("Material", ["Chrome", "Gold", "Picture skin", "Iridescent", "Glass"], 0),
                   ("Blobs", ["3", "5", "7"], 1),
                   ("Background", BACKGROUNDS, 2),
@@ -765,7 +785,7 @@ float map3(vec3 p){
     float fi = float(i);
     vec3 c = vec3(sin(t*(.5 + fi*.13) + fi*1.7), sin(t*(.37 + fi*.11) + fi*2.9)*.75,
                   sin(t*(.43 + fi*.07) + fi*4.1))*.42*(.55 + .6*clamp(u_amt, 0., 1.5));
-    float r = (.2 + .07*sin(fi*3.1 + t*1.3))*(.8 + .5*clamp(u_amt, 0., 1.5)) + u_bands.x*.06;
+    float r = (.2 + .07*sin(fi*3.1 + t*1.3))*(.8 + .5*clamp(u_amt, 0., 1.5)) + u_bands.x*.06*u_p1;
     d = smin3(d, length(p - c) - r, k);
   }
   float rip = (u_hits.x + u_hits.y*.7)*u_p1;
@@ -800,71 +820,88 @@ void main(){
     # The camera steers itself off any wall. Morph is the music's hand on the shape; Variation reshapes it.
     dict(id="fractal3d", name="Fractal Flight", amt=.4, amt_label="Morph", speed=True,
          params=[("Glow", .55), ("Fog", .45), ("Picture on walls", .0), ("Zoom", .5), ("Travel", .45),
-                 ("Variation", .0)],
+                 ("Variation", .0), ("Dance", .0)],
          options=[("Fractal", FRACTALS, 0),
                   ("Colour", PALETTES, 5),
                   ("Camera", ["Fly through", "Orbit", "Drift", "Dive in"], 0),
-                  ("Detail", DETAIL, 1)],
+                  ("Detail", DETAIL, 1),
+                  ("Music moves", ["Nothing", "The light (flashes on hits)", "The dance (bass drives it, kicks jolt it)",
+                                   "The light and the dance"], 0),
+                  ("Apollonian layers", ["Floor and ceiling", "Lattice in every direction"], 1)],
          code=SDF_TOOLS + """
 float trap;
-float fMorph(){ return clamp(u_amt, 0., 1.6); }
+// Variation and Morph turn the fractal's folds steadily one way. Turned by its own symmetry step (a quarter turn
+// for the cube-built ones, a third for the star) a fractal is exactly itself again, so 1 = 0: ramp or spin either
+// one and the shape keeps growing out of itself in the same direction, forever, with no jump and no going back.
+const float QTURN = 1.5707963, TURN = 6.2831853;
+float fV(){ return fract(u_p5); }    // Variation, in symmetry steps (1 is exactly 0 again)
+float fM(){ return fract(u_amt); }   // Morph, in symmetry steps (on a second axis)
+// Dance: every fold sways a little, each to its own rhythm, so the small forms ripple and change all the time
+// (the music can drive it: the bass how hard, the kicks a jolt)
+float fDanceAmt(){ return u_p6*(u_opt4 >= 2 ? .3 + u_bands.x*1.6 + u_hits.x*.8 : 1.); }
+float fDance(float i){
+  float fold = (u_opt0 == 0 || u_opt0 == 1 || u_opt0 == 4 || u_opt0 == 7) ? .25 : 1.;   // cube folds compound it
+  return fDanceAmt()*.14*fold*(sin(u_time*1.9 + i*1.7) + .5*sin(u_time*3.1 - i*2.3));
+}
 float fSponge(vec3 p){     // endless sponge tunnels; Variation turns each level against the last
-  float m = fMorph();
   p = mod(p + 1., 2.) - 1.;
   float d = sdBox3(p, vec3(1.)), s = 1.;
   int it = 3 + u_opt3;
-  mat2 tw = rot(u_p5*.5);
+  float fi = 0.;
   for (int i = 0; i < 7; i++){
     if (i >= it) break;
     vec3 a = mod(p*s, 2.) - 1.;
     s *= 3.;
     vec3 r = abs(1. - 3.*abs(a));
-    d = max(d, (min(max(r.x, r.y), min(max(r.y, r.z), max(r.z, r.x))) - 1. - m*.25)/s);
+    d = max(d, (min(max(r.x, r.y), min(max(r.y, r.z), max(r.z, r.x))) - 1.)/s);
     trap = min(trap, length(a)*.7 + float(i)*.15);
-    p.xy = tw*p.xy;
+    p.xy = rot(fV()*QTURN + fDance(fi))*p.xy; p.yz = rot(fM()*QTURN + fDance(fi + 4.)*.6)*p.yz;
+    fi += 1.;
   }
   return d;
 }
 float fMenger(vec3 p){     // the Menger cube (folded form); Variation twists the folds into new shapes
-  float m = fMorph(), s = 1.;
-  mat2 ra = rot(u_p5*.6 + m*.05), rb = rot(u_p5*.35);
+  float s = 1.;
   int it = 4 + u_opt3;
   for (int i = 0; i < 8; i++){
     if (i >= it) break;
+    float fi = float(i);
+    p.xy = rot(fV()*QTURN + fDance(fi))*p.xy; p.yz = rot(fM()*QTURN + fDance(fi + 4.)*.6)*p.yz;
     p = abs(p);
     if (p.x < p.y) p.xy = p.yx;
     if (p.x < p.z) p.xz = p.zx;
     if (p.y < p.z) p.yz = p.zy;
-    p = p*3. - vec3(2., 2., 0.)*(1. + m*.06);
+    p = p*3. - vec3(2., 2., 0.);
     if (p.z > 1.) p.z -= 2.;
-    p.xy = ra*p.xy; p.yz = rb*p.yz;
     s *= 3.;
     trap = min(trap, length(p)*.12 + float(i)*.12);
   }
   return sdBox3(p, vec3(1.))/s;
 }
 float fBox(vec3 p){        // Mandelbox
-  vec3 z = p; float dr = 1., scale = -1.6 - u_p5 - .35*fMorph();
+  vec3 z = p; float dr = 1., scale = -1.75;
   int it = 8 + u_opt3*2;
   for (int i = 0; i < 16; i++){
     if (i >= it) break;
     z = clamp(z, -1., 1.)*2. - z;
     float r2 = dot(z, z);
     if (r2 < .25) { z *= 4.; dr *= 4.; } else if (r2 < 1.) { z /= r2; dr /= r2; }
+    z.xy = rot(fV()*TURN + fDance(float(i))*.5)*z.xy; z.yz = rot(fM()*TURN + fDance(float(i) + 4.)*.3)*z.yz;
     z = z*scale + p; dr = dr*abs(scale) + 1.;
     trap = min(trap, r2*.3);
   }
   return length(z)/abs(dr);
 }
 float fBulb(vec3 p){       // Mandelbulb: the 3D Mandelbrot
-  float pw = 8. + (u_p5 - .25)*8. - fMorph()*1.5, dr = 1., r = length(p);
+  float pw = 8., dr = 1., r = length(p);
   vec3 z = p;
   int it = 5 + u_opt3;
   for (int i = 0; i < 9; i++){
     if (i >= it) break;
     r = length(z);
     if (r > 2.) break;
-    float th = acos(clamp(z.y/max(r, 1e-6), -1., 1.))*pw + u_time*.05, ph = atan(z.z, z.x)*pw;
+    float th = acos(clamp(z.y/max(r, 1e-6), -1., 1.))*pw + u_time*.05 + fM()*TURN + fDance(float(i))*1.5;
+    float ph = atan(z.z, z.x)*pw + fV()*TURN + fDance(float(i) + 5.)*1.5;
     dr = pow(r, pw - 1.)*pw*dr + 1.;
     z = pow(r, pw)*vec3(sin(th)*cos(ph), cos(th), sin(th)*sin(ph)) + p;
     trap = min(trap, length(z)*.35);
@@ -873,27 +910,27 @@ float fBulb(vec3 p){       // Mandelbulb: the 3D Mandelbrot
   return .5*log(max(r, 1e-6))*r/dr;
 }
 float fOcta(vec3 p){       // octahedral sponge: a sponge built of knobbly balls (holes through every face)
-  float s = 1., m = fMorph();
-  mat3 Rv = rAxis(vec3(.3, 1., .5), u_p5*.5);
+  float s = 1.;
   vec3 p0 = p;
   int it = 4 + u_opt3;
   for (int i = 0; i < 8; i++){
     if (i >= it) break;
+    float fi = float(i);
+    p.xy = rot(fV()*QTURN + fDance(fi))*p.xy; p.yz = rot(fM()*QTURN + fDance(fi + 4.)*.6)*p.yz;
     p = abs(p);
     if (p.x < p.y) p.xy = p.yx;
     if (p.x < p.z) p.xz = p.zx;
     if (p.y < p.z) p.yz = p.zy;
     p = p*3. - vec3(2., 2., 0.);
     if (p.z > 1.) p.z -= 2.;
-    p = Rv*p;
     s *= 3.;
     trap = min(trap, length(p)*.12 + float(i)*.12);
   }
-  float d = max(length(p) - 1.22 - m*.1, (abs(p.x) + abs(p.y) + abs(p.z) - 1.75)*.577)/s;   // truncated balls
+  float d = max(length(p) - 1.22, (abs(p.x) + abs(p.y) + abs(p.z) - 1.75)*.577)/s;   // truncated balls
   return max(d, (abs(p0.x) + abs(p0.y) + abs(p0.z) - 2.05)*.577);   // cut to an octahedral cluster
 }
 float fStar(vec3 p){       // kaleidoscope star: a folded, turning tetrahedron (spiky, faceted)
-  mat3 Rv = rAxis(vec3(1., .7, .4), .08 + u_p5*.35 + fMorph()*.04);
+  mat3 Rv = rAxis(vec3(1.), fract(fV() + fM())*TURN)*rAxis(vec3(1., .7, .4), .08);
   float s = 1.;
   int it = 7 + u_opt3;
   for (int i = 0; i < 11; i++){
@@ -902,6 +939,7 @@ float fStar(vec3 p){       // kaleidoscope star: a folded, turning tetrahedron (
     if (p.x + p.z < 0.) p.xz = -p.zx;
     if (p.y + p.z < 0.) p.zy = -p.yz;
     p = Rv*p;
+    p.xy = rot(fDance(float(i))*.5)*p.xy;
     p = p*2. - vec3(1.);
     s *= 2.;
     trap = min(trap, length(p)*.15 + float(i)*.07);
@@ -910,29 +948,34 @@ float fStar(vec3 p){       // kaleidoscope star: a folded, turning tetrahedron (
 }
 float fApollo(vec3 p){     // Apollonian lace: endless bubbles inside bubbles
   p *= .5;
-  float k1 = 1.15 + u_p5*.45 + fMorph()*.08, sc = 1.;
+  float k1 = 1.25, sc = 1.;
+  vec3 slide = vec3(fV(), fM(), 0.)*2.;
   int it = 6 + u_opt3;
   for (int i = 0; i < 10; i++){
     if (i >= it) break;
-    p = -1. + 2.*fract(.5*p + .5);
+    p = -1. + 2.*fract(.5*(p + slide) + .5);
+    p.xy = rot(fDance(float(i))*.4)*p.xy;
     float r2 = max(dot(p, p), 1e-4), k = k1/r2;
     p *= k; sc *= k;
     trap = min(trap, r2*.8);
   }
-  return .5*abs(p.y)/sc;
+  float slab = u_opt5 == 1 ? min(min(abs(p.x), abs(p.y)), abs(p.z)) : abs(p.y);   // lattice: sheets every way
+  return .5*slab/sc;
 }
 float fCrystal(vec3 p){    // crystal lattice
-  float m = fMorph(), s = 1.;
+  float s = 1.;
   p = mod(p + 1.5, 3.) - 1.5;
   int it = 4 + u_opt3;
   for (int i = 0; i < 8; i++){
     if (i >= it) break;
+    float fi = float(i);
+    p.xy = rot((fV() + fM())*QTURN + fDance(fi))*p.xy;   // both on the axis its fold takes up
     p = abs(p);
     if (p.x < p.y) p.xy = p.yx;
     if (p.x < p.z) p.xz = p.zx;
     if (p.y < p.z) p.yz = p.zy;
-    p = p*1.85 - vec3(1., .8, .6)*(.9 + .25*m);
-    p.xy = rot(.25 + .15*sin(u_time*.07) + u_p5*.4)*p.xy;
+    p = p*1.85 - vec3(1., .8, .6)*(.9 + .25*.4);
+    p.xy = rot(.25 + .15*sin(u_time*.07))*p.xy;
     s *= 1.85;
     trap = min(trap, length(p)*.4);
   }
@@ -944,25 +987,24 @@ float fCrystal(vec3 p){    // crystal lattice
 bool fEndless(){ return u_opt2 == 3 && (u_opt0 == 0 || u_opt0 == 1 || u_opt0 == 4); }
 float fDiveF(){ return fract(u_time*mix(.025, .2, u_p4)); }
 float fEndlessSponge(vec3 p){
-  float f = fDiveF(), m = fMorph(), A = u_p5*.6;
+  float f = fDiveF(), A = fV()*QTURN, B = fM()*QTURN;
   int n = 7 + u_opt3;
   float d = -1e9, best = 0.;
   for (int j = 0; j < 12; j++){
     if (j > n) break;
     float s = pow(3., float(j) - 1. - f);           // coarsest cells 6 across: a tunnel 2 wide
     vec3 q = p;
-    q.xy = rot(A*(float(j) - f))*q.xy;              // Variation: each size turned against the next (seamlessly)
+    q.xy = rot(A*(float(j) - f) + B + fDance(float(j) - f)*.5)*q.xy;   // each size turned against the next
     vec3 a = mod(q*s, 2.) - 1.;
     vec3 r = abs(1. - 3.*abs(a));
     float w = j == 0 ? 1. - f : j == n ? f : 1.;
-    float c = (min(max(r.x, r.y), min(max(r.y, r.z), max(r.z, r.x))) - mix(2.2, 1. + m*.2, w))/(3.*s);
+    float c = (min(max(r.x, r.y), min(max(r.y, r.z), max(r.z, r.x))) - mix(2.2, 1., w))/(3.*s);
     if (c > d) { d = c; best = float(j); }
   }
   trap = (best - f)*.16;   // colour by size: drifts smoothly as you sink
   return d;
 }
-float map3(vec3 p){
-  trap = 1e9;
+float fShape(vec3 p){
   if (fEndless()) return fEndlessSponge(p);
   int f = u_opt0;
   if (f == 0) return fSponge(p);
@@ -973,6 +1015,18 @@ float map3(vec3 p){
   if (f == 5) return fStar(p);
   if (f == 6) return fApollo(p);
   return fCrystal(p);
+}
+float fSizeOf(){ int f = u_opt0; return f == 1 ? 1.5 : f == 2 ? 4. : f == 3 ? 1.2 : f == 4 ? 2. : f == 5 ? 1.8 : 2.; }
+float map3(vec3 p){
+  trap = 1e9;
+  float d = fShape(p), amt = fDanceAmt();
+  if (amt > 0. && !fEndless()) {   // ferrofluid shimmer: fine ripples running over the surface
+    vec3 q = p*(26./fSizeOf());
+    float t = u_time;
+    d += amt*fSizeOf()*.0035*sin(q.x + t*7.)*sin(q.y*1.13 - t*6.)*sin(q.z*.93 + t*8.);
+    d *= .9;
+  }
+  return d;
 }
 """ + RAY_TOOLS + """
 bool fInfinite(){ return u_opt0 == 0 || u_opt0 >= 6 || fEndless(); }
@@ -996,11 +1050,10 @@ vec3 nebula(vec3 rd, float t){
   float n = sin(a*3. + t*.05) + sin(b*4. - a*2. + t*.07) + sin((a + b)*5. + t*.03)*.5;
   return palCycle(u_opt1, .5 + n*.12 + b*.2 + t*.02, tx(vec2(.5)).rgb)*(.07 + .05*n*n);
 }
-void main(){
+void fCamera(out vec3 eye, out vec3 at){
   float t = u_time, tr = mix(.2, 2., u_p4), R = fSize();
   int cam = u_opt2;
   bool inf = fInfinite();
-  vec3 eye, at;
   float margin = .02*R;
   if (fEndless()) {                       // sinking down the endless tunnel, looking round as we go
     eye = vec3(sin(t*.11)*.25, cos(t*.08)*.2, 2.4);
@@ -1016,7 +1069,7 @@ void main(){
     at = eye + vec3(cos(t*.07), sin(t*.05)*.4, 1.);
   } else if (inf) {                       // endless flight down the tunnels (Dive: faster, closer)
     vec3 base = u_opt0 == 7 ? vec3(1.5, 1.5, 0.) : u_opt0 == 6 ? vec3(2., 2., 0.) : vec3(0.);
-    eye = base + vec3(sin(t*.3)*.08, cos(t*.23)*.08, t*.45*tr*(cam == 3 ? 1.8 : 1.) + u_music.x*.1);
+    eye = base + vec3(sin(t*.3)*.08, cos(t*.23)*.08, t*.45*tr*(cam == 3 ? 1.8 : 1.));
     at = eye + vec3(sin(t*.17)*.3, sin(t*.13)*.2, 1.);
   } else {   // shapes: always on or in the structure, drifting over it and sinking deep into it and back out
     float tw = t*tr*.5;
@@ -1039,8 +1092,39 @@ void main(){
   vec3 e0 = eye;
   eye = avoid3(eye, margin);
   at += eye - e0;
-  vec3 rd = rayDir(eye, at, 1.1);
+}
+// your picture over the surfaces: mirrored tiles, blended smoothly round the shape, averaged far away
+vec2 fMirror(vec2 u){ return abs(fract(u*vec2(1./asp3(), 1.)*.5)*2. - 1.); }
+vec3 fPic1(vec3 p, vec3 w, float k, float fw){
+  vec2 o = vec2(fw*.5*k, 0.);
+  vec3 c = vec3(0.);
+  for (int i = 0; i < 4; i++){
+    vec2 dd = i == 0 ? o.xy : i == 1 ? -o.xy : i == 2 ? o.yx : -o.yx;
+    c += tx(fMirror(p.zy*k + dd)).rgb*w.x + tx(fMirror(p.xz*k + dd)).rgb*w.y + tx(fMirror(p.xy*k + dd)).rgb*w.z;
+  }
+  return c*.25;
+}
+vec3 fPicture(vec3 p, vec3 n, float d){
+  vec3 w = pow(abs(n), vec3(4.)); w /= dot(w, vec3(1.));
+  float k = 1.3/fSize(), fw = d*1.2/u_res.y;
+  if (fEndless()) {   // the dive grows the world 3x a cycle: crossfade two picture sizes so it grows with it
+    float f = fDiveF(), G = pow(3., f);
+    return mix(fPic1(p/G, w, k, fw/G), fPic1(p*3./G, w, k, fw*3./G), f);
+  }
+  // far away a tile shrinks below a few pixels: use a tile twice (four times...) the size there instead, so the
+  // distance keeps the picture's colours and shapes rather than going grey; the two nearest sizes are blended
+  float lod = clamp(log2(max(fw*k*60., 1.)), 0., 5.), l0 = floor(lod);
+  float k0 = k*exp2(-l0);
+  return mix(fPic1(p, w, k0, fw), fPic1(p, w, k0*.5, fw), lod - l0);
+}
+void main(){
+  float t = u_time, R = fSize();
+  bool inf = fInfinite();
   int maxS = 70 + u_opt3*30;
+  vec3 eye, at;
+  vec4 E = texelFetch(u_s0, ivec2(0, 0), 0), A = texelFetch(u_s0, ivec2(1, 0), 0);
+  if (E.w > .5) { eye = E.xyz; at = A.xyz; } else fCamera(eye, at);   // the glided camera, once it has one
+  vec3 rd = rayDir(eye, at, 1.1);
   float steps, d = rayMarch(eye, rd, inf ? 30. : R*5., maxS, steps);
   vec3 fogC = nebula(rd, t);
   vec3 col = fogC;
@@ -1049,13 +1133,9 @@ void main(){
     map3(p);
     float tr2 = trap;
     vec3 base = palCycle(u_opt1, tr2*1.2 + t*.03, tx(fract(p.xy*.25)).rgb);
-    if (u_p2 > 0.) {   // the picture on the walls (triplanar)
-      vec3 w = pow(abs(n), vec3(4.)); w /= dot(w, vec3(1.));
-      vec3 pic = tx(fract(p.zy*.3)).rgb*w.x + tx(fract(p.xz*.3)).rgb*w.y + tx(fract(p.xy*.3)).rgb*w.z;
-      base = mix(base, pic*1.2, u_p2);
-    }
-    col = light3(base, n, p, eye, .25)*ao3(p, n);
-    col += base*(u_hits.x*.35 + u_hits.y*.15);
+    if (u_p2 > 0.) base = mix(base, fPicture(p, n, d)*1.2, u_p2);   // the picture on the walls
+    col = light3(base, n, p, eye, .25)*ao3(p, n) + base*.22;   // a little light of its own: colour, not grey
+    if (u_opt4 == 1 || u_opt4 == 3) col += base*(u_hits.x*.35 + u_hits.y*.15);
     col = mix(fogC, col, exp(-d*d*mix(.002, .08, u_p1)/(R*R*.25)));
   }
   col += palCycle(u_opt1, .1 + steps/float(maxS)*.5 + t*.02, vec3(.5))*pow(steps/float(maxS), 2.)*u_p0*1.4;
@@ -1067,33 +1147,69 @@ void main(){
     # arches with you standing in glowing alcoves), with the picture on screens along the walls and waiting at the
     # far end; neon edges pulse with the music. Walls can be plain or covered in eye cells, squiggles or chrome hex.
     dict(id="halls3d", name="Infinite Halls", amt=.45, amt_label="Speed", speed=True,
-         params=[("Neon", .6), ("Fog", .4), ("Screens", .8), ("Pattern size", .5)],
-         options=[("Style", ["Arches", "Square tunnel", "Pillars", "Visionary hall"], 0),
+         params=[("Neon", .6), ("Fog", .4), ("Screens", .8), ("Pattern size", .5), ("Doorway nearness", .45)],
+         options=[("Style", ["Arches", "Square tunnel", "Colonnade", "Visionary hall"], 0),
                   ("Colour", PALETTES, 5),
-                  ("Far end shows", BACKGROUNDS, 3),
+                  ("Far end shows", ["Glow"] + BACKGROUNDS[1:], 0),
                   ("Steer", ["Straight", "Sway", "Roll"], 1),
-                  ("Walls", ["Style's own", "Plain", "Eye cells", "Squiggle maze", "Chrome hex"], 0)],
+                  ("Walls", ["Auto (eye cells in Visionary, else your picture)", "Dark stone", "Marble", "Gold",
+                             "Your picture",
+                             "Eye cells", "Squiggle maze", "Chrome hex"], 0),
+                  ("Music moves", ["Nothing", "The neon", "The neon and the camera"], 0)],
          mask_when=(0, (3,)),
          code=SDF_TOOLS + """
 float archIn(vec3 p, float r0){ vec2 qa = vec2(p.x, p.y - .2); return qa.y < 0. ? abs(qa.x) - r0 : length(qa) - r0; }
+// a Roman column at the origin of q (y is up, floor at -1): plinth, base mouldings, a fluted tapering shaft,
+// a capital and its abacus slab
+float column(vec3 q){
+  float r = length(q.xz), y = q.y;
+  float taper = 1. - .12*clamp((y + .85)/2.25, 0., 1.);
+  float flutes = .009*(.5 + .5*cos(atan(q.z, q.x)*20.));   // 20 rounded flutes
+  float shaft = max(r - .16*taper + flutes, abs(y - .3) - 1.12);
+  float plinth = sdBox3(vec3(q.x, y + .95, q.z), vec3(.25, .05, .25));
+  float tor1 = length(vec2(r - .19, y + .86)) - .045, tor2 = length(vec2(r - .175, y + .79)) - .03;
+  float neck = length(vec2(r - .15, y - 1.34)) - .025;
+  float echinus = length(vec2(r - .17, y - 1.43)) - .055;
+  float abacus = sdBox3(vec3(q.x, y - 1.52, q.z), vec3(.24, .04, .24));
+  return min(min(min(shaft, plinth), min(tor1, tor2)), min(min(neck, echinus), abacus));
+}
 float map3(vec3 p){
   float rep = 2.2;
   vec3 q = p; q.z = mod(q.z + rep*.5, rep) - rep*.5;
+  float qz2 = mod(p.z, rep) - rep*.5;   // half-way between frames
   float flo = p.y + 1.;
   float d;
-  if (u_opt0 == 0) {          // arches: a frame every few metres, walls between
+  if (u_opt0 == 0) {          // arches: moulded frames with keystones, pilastered walls, cornice and skirting
     float outer = sdBox3(q, vec3(1.9, 2.4, .18));
-    d = max(outer, -archIn(p, 1.35));
+    float ai = archIn(p, 1.35);
+    d = max(outer, -ai);
+    d = min(d, length(vec2(ai + .03, abs(q.z) - .18)) - .05);              // rounded lip round the opening
+    d = min(d, length(vec2(ai + .1, abs(q.z) - .19)) - .025);              // and a second, finer one
+    d = min(d, sdBox3(vec3(p.x, p.y - 1.62, q.z), vec3(.13, .17, .23)));   // keystone
+    d = min(d, sdBox3(vec3(abs(p.x) - 1.42, p.y - .2, q.z), vec3(.14, .05, .24)));   // imposts
     d = min(d, 1.75 - abs(p.x));   // side walls
+    float pil = sdBox3(vec3(abs(p.x) - 1.72, p.y - .3, qz2), vec3(.07, 1.3, .17));
+    pil += .006*(.5 + .5*cos(qz2*110.))*smoothstep(1.15, 1.05, abs(p.y - .3));   // fluted pilasters
+    d = min(d, pil);
+    d = min(d, max(abs(abs(p.x) - 1.73) - .1, abs(p.y - 1.7) - .05));     // cornice
+    d = min(d, max(abs(abs(p.x) - 1.74) - .06, abs(p.y + .92) - .08));    // skirting
   } else if (u_opt0 == 1) {   // square tunnel with ribs
     d = min(1.5 - abs(p.x), 1.6 - p.y);
     d = min(d, max(sdBox3(q, vec3(1.6, 1.8, .07)), -sdBox3(q, vec3(1.4, 1.5, 1.))));
-  } else if (u_opt0 == 2) {   // pillars in the open
-    d = length(vec2(abs(q.x) - 1.3, q.z)) - .17;
+  } else if (u_opt0 == 2) {   // colonnade: columns, a beam with dentils, a coffered ceiling
+    float cx = mod(p.x, 2.6) - 1.3;   // columns every 2.6 across and 2.2 along, as far as you can see
+    d = column(vec3(cx, p.y, q.z));
+    d = min(d, max(abs(cx) - .3, abs(p.y - 1.68) - .11));                 // beams along the hall
+    d = min(d, max(abs(q.z) - .26, abs(p.y - 1.72) - .07));               // and across it
+    d = min(d, sdBox3(vec3(cx, p.y - 1.55, mod(p.z, .14) - .07), vec3(.31, .022, .035)));   // dentils
+    float ceil = 1.95 - p.y;
+    float coffer = sdBox3(vec3(mod(p.x + .3, .6) - .3, p.y - 1.95, mod(p.z, .55) - .275), vec3(.21, .07, .19));
+    d = min(d, max(ceil, -coffer));
   } else {                    // visionary hall: nested arch ribs, a vaulted shell, an alcove every few metres
     float inner = archIn(p, 1.25);
     float qz = mod(p.z + .275, .55) - .275;
     float rib = max(max(-inner, abs(qz) - .07), inner - .3);
+    rib = min(rib, length(vec2(inner + .02, abs(qz) - .07)) - .03);   // a lip on each rib
     float shell = .45 - inner;
     float alc = sdBox3(vec3(abs(p.x) - 1.75, p.y + .15, q.z), vec3(.5, .85, .5));
     shell = max(shell, -alc);
@@ -1112,10 +1228,11 @@ vec3 eyeCells(vec2 u){        // a honeycomb of eyes: skin, a gold ring, a glowi
   vec2 g = dot(a, a) < dot(b, b) ? a : b;
   vec2 id = floor((u - g)*2. + .5);
   float d = length(g), hv = hash(id);
-  float open = .8 + .2*sin(u_time*1.3 + hv*6.28) + u_hits.x*.3;
+  float hit = u_opt5 > 0 ? u_hits.x : 0.;
+  float open = .8 + .2*sin(u_time*1.3 + hv*6.28) + hit*.3;
   vec3 skin = palCycle(u_opt1, .05 + hv*.08, vec3(.6, .3, .15))*(.55 + .25*sin(atan(g.y, g.x)*14. + d*30.));
   vec3 gold = palCycle(u_opt1, .2 + hv*.05, vec3(1., .8, .3))*1.1;
-  vec3 iris = palCycle(u_opt1, .55 + hv*.1 + u_time*.03, vec3(.2, .5, 1.))*(1.2 + u_hits.x*.8)*(.6 + .4*sin(d*90. - u_time*3.));
+  vec3 iris = palCycle(u_opt1, .55 + hv*.1 + u_time*.03, vec3(.2, .5, 1.))*(1.2 + hit*.8)*(.6 + .4*sin(d*90. - u_time*3.));
   vec3 c = skin*smoothstep(.5, .3, d);
   c = mix(c, gold, smoothstep(.31*open, .29*open, d));
   c = mix(c, iris, smoothstep(.25*open, .23*open, d));
@@ -1138,43 +1255,109 @@ float hexEdge(vec2 u){          // 0 on a hex lattice's edges, rising to the cel
   g = abs(g);
   return .5 - max(dot(g, normalize(vec2(1., 1.732))), g.x);
 }
-vec2 surfUV(vec3 p, vec3 n){ return abs(n.x) > .6 ? p.zy : abs(n.y) > .6 ? p.xz : p.xy; }
-int wallMode(){ return u_opt4 == 0 ? (u_opt0 == 3 ? 2 : 1) : u_opt4; }
-void main(){
+vec2 surfUV(vec3 p, vec3 n){
+  if (u_opt0 == 2 && p.y > -.99 && p.y < 1.6) {   // colonnade columns: wrapped round, like a label
+    vec2 c = vec2(mod(p.x, 2.6) - 1.3, mod(p.z + 1.1, 2.2) - 1.1);
+    if (length(c) < .33) return vec2(atan(c.y, c.x)*.33, p.y);
+  }
+  return abs(n.x) > .6 ? p.zy : abs(n.y) > .6 ? p.xz : p.xy;
+}
+// 1 dark stone, 2 marble, 3 gold, 4 eye cells, 5 squiggle maze, 6 chrome hex
+// 1 dark stone, 2 marble, 3 gold, 4 your picture, 5 eye cells, 6 squiggle maze, 7 chrome hex
+int wallMode(){ return u_opt4 == 0 ? (u_opt0 == 3 ? 5 : 4) : u_opt4; }
+// your picture tiled over a surface, every other tile mirrored so the edges meet
+vec3 picTile1(vec2 u){ vec2 k = u*mix(.35, 1.4, 1. - u_p3)*vec2(1./asp3(), 1.); return tx(abs(fract(k*.5)*2. - 1.)).rgb; }
+vec3 picTile(vec2 u, float fw){
+  if (fw < .004) return picTile1(u);
+  vec2 o = vec2(fw*.5, 0.);
+  return (picTile1(u + o.xy) + picTile1(u - o.xy) + picTile1(u + o.yx) + picTile1(u - o.yx))*.25;
+}
+vec3 marble(vec3 p){
+  float v = sin((p.x + p.z*.7)*3.5 + sin(p.y*2.7 + p.z*1.3)*2.2 + sin(p.x*7.1 - p.y*5.3)*.6);
+  return mix(vec3(.82, .8, .77), vec3(.38, .37, .4), smoothstep(.75, 1., v)*.8);
+}
+vec3 hallPixel(){
   float t = u_time, rep = 2.2;
-  float z = t*(.4 + u_amt*1.6) + u_music.x*.15;
+  bool camMusic = u_opt5 == 2;
+  float z = t*(.4 + u_amt*1.6) + (camMusic ? u_music.x*.15 : 0.);
   float sway = u_opt3 == 1 ? sin(t*.4)*.35 : 0.;
-  vec3 eye = vec3(sway, -.15 + sin(t*.7)*.04 + u_hits.x*.03, -z);
+  vec3 eye = vec3(sway, -.15 + sin(t*.7)*.04 + (camMusic ? u_hits.x*.03 : 0.), -z);
   vec3 at = eye + vec3(sin(t*.3)*.15*float(u_opt3 == 1), 0., -1.);
   vec3 rd = rayDir(eye, at, 1.05);
   if (u_opt3 == 2) rd = rz(t*.2)*rd;
   float steps, d = rayMarch(eye, rd, 40., 110, steps);
-  vec3 far = bg3d(u_opt2, v_uv);
+  // the floor (and the colonnade's ceiling) reach all the way: where the march gave up, meet them exactly
+  if (d < 0. && rd.y < 0.) d = (-1. - eye.y)/rd.y;
+  else if (d < 0. && rd.y > 0. && u_opt0 == 2) d = (1.88 - eye.y)/rd.y;
+  // the far end: a glow down the hall in the palette (opaque), or the picture
+  vec3 fwd = normalize(at - eye);
+  vec3 glowC = palCycle(u_opt1, t*.05, vec3(.5));
+  vec3 far = glowC*(.05 + .9*pow(max(dot(rd, fwd), 0.), 40.));
+  // the picture at the end of the hall: a window filling the hall's own opening, a set distance ahead (the end
+  // of an endless hall stays ahead), in the fog like everything else, its light spilling onto what's near it
+  float tP = -1.;
+  vec3 pic = vec3(0.), spill = vec3(0.);
+  vec3 picAvg = (tx(vec2(.3, .3)).rgb + tx(vec2(.7, .3)).rgb + tx(vec2(.5, .5)).rgb + tx(vec2(.3, .7)).rgb
+               + tx(vec2(.7, .7)).rgb)/5.;
+  float zP = eye.z - mix(30., 9., u_p4);
+  if (u_opt2 > 0 && rd.z < 0.) {
+    tP = (eye.z - zP)/(-rd.z);
+    vec3 pp = eye + rd*tP;
+    float top = u_opt0 == 0 ? 1.55 : u_opt0 == 1 ? 1.5 : u_opt0 == 2 ? 1.88 : 1.45;
+    float halfW = u_opt0 == 0 ? 1.35 : u_opt0 == 1 ? 1.4 : u_opt0 == 2 ? 1.2 : 1.25;
+    float inside = u_opt0 == 0 ? -archIn(pp, 1.35) : u_opt0 == 3 ? -archIn(pp, 1.25)
+                 : min(halfW - abs(pp.x), top - pp.y);
+    inside = min(inside, pp.y + 1.);
+    if (inside > 0. && (d < 0. || tP < d)) {
+      // through the doorway: the picture is the world outside, far beyond the opening and much bigger than it,
+      // so the doorway frames part of it (and it shifts a little against the frame as the camera sways)
+      float back = mix(18., 40., u_p4), tB = (eye.z - (zP - back))/(-rd.z);
+      vec3 pb = eye + rd*tB;
+      float S = (top + 1.)*2.6*(eye.z - zP + back)/(eye.z - zP);
+      vec2 puv = vec2(.5 + (pb.x - eye.x*.5)/(S*asp3()), .5 - (pb.y - eye.y - .15*S)/S);
+      pic = bg3d(u_opt2, clamp(puv, 0., 1.))*1.25;
+    } else tP = -1.;
+    spill = picAvg;
+  }
   vec3 col = far;
   int wm = wallMode();
   if (d > 0.) {
     vec3 p = eye + rd*d, n = calcNormal(p, d);
+    // how big one pixel is on this surface (bigger far away and at grazing angles): fine detail fades out past it
+    float fw = d*1.16/u_res.y/max(abs(dot(n, rd)), .2);
+    float fadeP = smoothstep(.1, .45, fw*patScale());
     float qz = mod(p.z + rep*.5, rep) - rep*.5;
     float cell = floor((p.z + rep*.5)/rep);
     vec3 neonC = palCycle(u_opt1, cell*.13 + t*.05, far);
     vec3 base = vec3(.06, .065, .08), glow = vec3(0.);
     bool floorHit = p.y < -.99;
     vec2 su = surfUV(p, n);
-    if (wm == 2) { base = eyeCells(su); glow = base*.3; }
-    else if (wm == 3) { base = squiggle(su); glow = base*.3; }
-    else if (wm == 4) {
-      float e = hexEdge(su), tube = smoothstep(.08, .02, e);
+    float metal = .5;
+    if (wm == 4) {   // far away the tiles blend to the picture's average colour rather than sparkle
+      base = mix(picTile(su, fw), picAvg, smoothstep(.15, .6, fw*mix(.35, 1.4, 1. - u_p3)));
+      glow = base*.35; metal = .2;
+    }
+    else if (wm == 5) { base = mix(eyeCells(su), palCycle(u_opt1, .12, vec3(.6, .3, .15))*.42, fadeP); glow = base*.3; }
+    else if (wm == 6) { base = mix(squiggle(su), palCycle(u_opt1, .3 + u_time*.04, vec3(.6))*.5, fadeP); glow = base*.3; }
+    else if (wm == 2) { base = marble(p)*(floorHit ? .7 : 1.); metal = .3; }
+    else if (wm == 3) {
+      base = vec3(1., .74, .33)*(.55 + .45*envPic(reflect(rd, n)));
+      metal = .9;
+    }
+    else if (wm == 7) {
+      float e = hexEdge(su), tube = mix(smoothstep(.08, .02, e), .3, fadeP);
       vec3 chrome = envPic(reflect(rd, n))*.9 + pow(max(dot(reflect(rd, n), normalize(vec3(.45, .8, .55))), 0.), 30.);
       base = mix(squiggle(su*1.3)*.45, chrome, tube);
       glow = base*.15;
     } else if (floorHit) {   // plain floor: polished, catching the neon
       vec2 g = abs(fract(vec2(p.x*1.2, p.z*.9)) - .5);
-      base = vec3(.03) + neonC*smoothstep(.04, 0., min(g.x, g.y))*.5*u_p0;
+      float lw = .04 + fw*1.2;   // lines widen (and dim) with distance instead of breaking up
+      base = vec3(.03) + neonC*smoothstep(lw, 0., min(g.x, g.y))*.5*u_p0*(.04/lw);
     }
-    col = light3(base, n, p, eye, wm == 4 ? .7 : .5)*ao3(p, n) + glow;
-    if (wm >= 2 && floorHit) col *= .55;   // patterned floor a step darker than the walls
+    col = light3(base, n, p, eye, wm == 7 ? .7 : metal)*ao3(p, n) + glow;
+    if (wm >= 4 && floorHit) col *= .7;   // patterned floor a step darker than the walls
     // screens on the side walls, between the arches
-    if (abs(n.x) > .8 && u_opt0 < 2 && abs(qz) < .8 && p.y > -.55 && p.y < .75) {
+    if (abs(n.x) > .8 && u_opt0 < 2 && abs(qz) < .8 && p.y > -.55 && p.y < .75 && abs(p.x) > 1.74) {
       vec2 suv = vec2((qz/.8)*.5*sign(p.x) + .5, 1. - (p.y + .55)/1.3);
       vec3 pic = tx(suv).rgb;
       float edge = smoothstep(.0, .03, min(min(suv.x, 1. - suv.x), min(suv.y, 1. - suv.y)));
@@ -1194,15 +1377,80 @@ void main(){
     // neon along the edges of the openings
     float inner = u_opt0 == 0 ? archIn(p, 1.35) : u_opt0 == 1 ? max(abs(p.x) - 1.4, p.y - 1.5)
                 : u_opt0 == 3 ? archIn(p, 1.25) : 1.;
-    float rim = smoothstep(.05, .0, abs(inner))*step(.7, abs(n.z));
+    float rim = smoothstep(.05 + fw, .0, abs(inner))*smoothstep(.6, .8, abs(n.z))*(.05/(.05 + fw));
     float edgeGlow = pow(1. - abs(dot(n, normalize(eye - p))), 6.);
-    col += neonC*(edgeGlow*.5 + rim*1.2)*u_p0*(1. + u_hits.x*1.2 + u_hits.y*.6);
+    col += neonC*(edgeGlow*.5 + rim*1.2)*u_p0*(1. + (u_opt5 > 0 ? u_hits.x*1.2 + u_hits.y*.6 : 0.));
+    if (u_opt2 > 0) col += spill*base*.9*exp(-max(p.z - zP, 0.)*.22)*(.5 + .5*max(-n.z, 0.) + .5*float(floorHit));
     col = mix(far*.6, col, exp(-d*d*mix(.0008, .02, u_p1)));
   }
+  if (tP > 0.) col = mix(spill*.8, pic, .55 + .45*exp(-tP*tP*mix(.0008, .02, u_p1)*.35));   // outside: bright, a little hazy
   col += palCycle(u_opt1, t*.05, far)*pow(steps/110., 2.)*u_p0*.6;
-  o = vec4(col, 1.);
-}"""),
+  return col;
+}
+void main(){ o = vec4(hallPixel(), 1.); }"""),
 ]
 
 FOG.update({"object3d": 0., "metal3d": 0., "fractal3d": 0., "halls3d": 0.})
+
+# ---------------------------------------------------------------- Smoothing for the raymarched worlds
+# One ray per pixel makes thin edges and fine detail shimmer as things move. Smoothing takes 2 or 4 rays per pixel
+# (a rotated grid) and averages them; "Over time" takes one ray per frame from a different spot in the pixel and
+# blends it with the frames before (kept in the effect's own buffer), letting big changes through at once so
+# moving things don't leave trails.
+SMOOTHING = ["Off", "2x (smooth edges)", "4x (smoothest, slower)", "Over time (smooth and light; can trail a little)"]
+
+
+def _smoothable(fx, cam=None):
+    hist = "u_s1" if cam else "u_s0"   # the camera buffer, when there is one, comes first
+    k = len(fx["options"])
+    fx["options"].append(("Smoothing", SMOOTHING, 1))
+    assert fx["code"].count("void main()") == 1, fx["id"]
+    body = fx["code"].replace("void main()", "void rayPixel()")
+    opt = f"u_opt{k}"
+    fx["code"] = body + f"""
+const vec2 SMOOTH_AT[6] = vec2[6](vec2(-.25, .25), vec2(.25, -.25),
+                                  vec2(.125, .375), vec2(.375, -.125), vec2(-.125, -.375), vec2(-.375, .125));
+void main(){{
+  if ({opt} == 3) {{ o = vec4(texture({hist}, v_uv).rgb, 1.); return; }}
+  if ({opt} == 0) {{ rayPixel(); return; }}
+  int first = {opt} == 1 ? 0 : 2, n = {opt} == 1 ? 2 : 4;
+  vec3 c = vec3(0.);
+  for (int i = 0; i < 4; i++){{   // one copy of the work, run 2 or 4 times
+    if (i >= n) break;
+    rayJit = SMOOTH_AT[first + i];
+    rayPixel();
+    c += o.rgb;
+  }}
+  o = vec4(c/float(n), 1.);
+}}"""
+    fx["state"] = [GL3D + COMPOSE + RAY3D + body + f"""
+void main(){{
+  if ({opt} != 3) {{ o = vec4(0.); return; }}   // only "Over time" uses this buffer
+  rayJit = vec2(hash(vec2(u_time*61.7, 3.1)), hash(vec2(u_time*47.3, 9.7))) - .5;
+  rayPixel();
+  vec3 cur = o.rgb, prev = texture({hist}, v_uv).rgb;
+  float w = mix(.25, 1., smoothstep(.08, .35, length(cur - prev)));   // big changes come through at once
+  o = vec4(mix(prev, cur, w), 1.);
+}}"""]
+    fx["state_size"] = [(1, "f2")]
+    if cam:
+        fx["state"].insert(0, GL3D + COMPOSE + RAY3D + body + cam)
+        fx["state_size"].insert(0, ((2, 1), "f4"))
+
+
+# Fractal Flight's camera glides: a 2-pixel buffer holds where it is (eye, look-at) and follows where it wants to
+# be, so pushes off walls and new surfaces ease in instead of jumping
+CAMERA_GLIDE = """
+void main(){
+  vec3 eye, at;
+  fCamera(eye, at);
+  vec4 E = texelFetch(u_s0, ivec2(0, 0), 0), A = texelFetch(u_s0, ivec2(1, 0), 0);
+  float k = 1. - exp(-u_dt/.4);
+  if (E.w < .5 || length(eye - E.xyz) > fSize()*1.5) k = 1.;   // first frame, or a whole new view: go at once
+  vec3 e = mix(E.xyz, eye, k), a = mix(A.xyz, at, k);
+  o = gl_FragCoord.x < 1. ? vec4(e, 1.) : vec4(a, 1.);
+}"""
+
+for _fx in RAY_EFFECTS:
+    _smoothable(_fx, cam=CAMERA_GLIDE if _fx["id"] == "fractal3d" else None)
 EFFECTS_3D += RAY_EFFECTS

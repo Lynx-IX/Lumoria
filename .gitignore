@@ -21,3 +21,6 @@ crash.log
 .claude/
 .vscode/
 .idea/
+
+# installers packed up to send to testers
+For testers/

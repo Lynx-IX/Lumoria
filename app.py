@@ -74,6 +74,12 @@ class Target:
         self.tex.release()
 
 
+def state_dims(k, w, h):
+    """A state buffer's size: a multiple of the output, or a fixed (w, h) in pixels (a few values kept between
+    frames, like a camera's position)."""
+    return (int(k[0]), int(k[1])) if isinstance(k, (tuple, list)) else (w * k, h * k)
+
+
 def glide_target(f, dt, secs):
     """Move an item's Apply-to weights (everywhere, subject, background) toward its current choice over
     about secs, so switching All / Subject / Background crossfades. Returns them for u_tw."""
@@ -106,6 +112,9 @@ class Effect:
         self.autos = {}              # automation: setting key ("amt", "p2"...) -> its LFO (see App.automate)
         self.morph = None            # (from, to, start time, seconds) while a Morph transition slides it
         self.mod = MOD_AUDIO if spec.get("react") else MOD_OFF
+        # Audio and 3D effects choose what the music does in their own settings, so they always hear it; any
+        # other effect hears it only when its music switch is on (or a slider of it follows the sound)
+        self.always_hears = spec.get("cat") in ("Audio", "3D")
         # what an Audio-driven effect follows: None = the main "React to" setting, else an audio.SOURCES key;
         # rng = its frequency range (Hz) for "range"; resp = None (the main smoothing) or [attack, release] in s
         self.listen, self.rng, self.resp = None, [80.0, 250.0], None
@@ -226,6 +235,10 @@ class Effect:
             return None if abs(self.mresp - 0.5) < 0.01 else [0.03 * r, 0.14 * r]
         return [base[0] * r, base[1] * r]
 
+    def hears(self):
+        """Whether the music reaches this effect at all (off: its shader hears silence)."""
+        return self.always_hears or self.mod == MOD_AUDIO or any(a.get("shape") == 7 for a in self.autos.values())
+
     def apply_uniforms(self, prog, size, dt, level, beat):
         set_u(prog, "u_res", size)
         set_u(prog, "u_time", self.clock)
@@ -241,12 +254,23 @@ class Effect:
         cols = [tuple(c) for c in self.colours][:E.MAX_COLOURS]
         set_u(prog, "u_cols", cols + [cols[-1]] * (E.MAX_COLOURS - len(cols)))   # the array is always full
         set_u(prog, "u_ncols", len(cols))
-        set_u(prog, "u_bands", beat["bands"])
-        set_u(prog, "u_hits", beat["hits"])
-        set_u(prog, "u_slow", beat["slow"])
-        set_u(prog, "u_width", beat["width"])
-        set_u(prog, "u_swell", beat["swell"])
-        set_u(prog, "u_music", beat["music"])
+        if self.hears():
+            set_u(prog, "u_mute", 0.0)
+            set_u(prog, "u_bands", beat["bands"])
+            set_u(prog, "u_hits", beat["hits"])
+            set_u(prog, "u_slow", beat["slow"])
+            set_u(prog, "u_width", beat["width"])
+            set_u(prog, "u_swell", beat["swell"])
+            set_u(prog, "u_music", beat["music"])
+        else:   # not listening: silence (the tempo clock, which can be tapped or set by hand, still runs)
+            set_u(prog, "u_mute", 1.0)
+            set_u(prog, "u_audio", 0.0)
+            set_u(prog, "u_bands", (0.0, 0.0, 0.0))
+            set_u(prog, "u_hits", (0.0, 0.0, 0.0, 0.0))
+            set_u(prog, "u_slow", (0.0, 0.0, 0.0, 0.5))
+            set_u(prog, "u_width", 0.0)
+            set_u(prog, "u_swell", (0.0, 0.0, 0.0, 0.0))
+            set_u(prog, "u_music", (0.0, 0.0, 0.0, 0.0))
         set_u(prog, "u_char", self.char)
         set_u(prog, "u_xf", (self.xs, math.radians(self.xr)))
         set_u(prog, "u_beats", beat["count"])
@@ -449,7 +473,7 @@ class Pipeline:
             for pair in f.state:
                 for t in pair:
                     t.release()
-            f.state = [[Target(self.ctx, w * k, h * k, dtype, 0.0) for _ in range(2)] for k, dtype in f.state_size]
+            f.state = [[Target(self.ctx, *state_dims(k, w, h), dtype, 0.0) for _ in range(2)] for k, dtype in f.state_size]
         self.outgoing = None
         for g in walk(self.order):
             if isinstance(g, Group):
@@ -465,7 +489,7 @@ class Pipeline:
         Pipeline._next_uid += 1
         f.uid = Pipeline._next_uid
         w, h = self.size
-        f.state = [[Target(self.ctx, w * k, h * k, dtype, 0.0) for _ in range(2)] for k, dtype in f.state_size]
+        f.state = [[Target(self.ctx, *state_dims(k, w, h), dtype, 0.0) for _ in range(2)] for k, dtype in f.state_size]
         effects.append(f)
         return f
 
@@ -930,6 +954,7 @@ class Pipeline:
                         pair[new if j < s else f.parity].tex.use(4 + j)
                     f.state[s][new].fbo.use()
                     f.apply_uniforms(sprog, (W, H), dt, lv, self.beat)
+                    set_u(sprog, "u_plate_on", 1.0 if self.plate else 0.0)
                     svao.render(vertices=3)
                 f.parity = new
                 for j, pair in enumerate(f.state):
@@ -1706,7 +1731,7 @@ class App:
                 self.remove_effect(f)
         for f in picks:
             f.amt = random.uniform(.2, .9)
-            f.mod = random.choice((MOD_OFF, MOD_AUDIO, MOD_WAVE))
+            f.mod = random.choice((MOD_OFF, MOD_AUDIO))
             self.add_effect(f)
         self.current_preset = None
 
@@ -1767,6 +1792,10 @@ class App:
         f.keep_out = e.get("keep_out", False)
         f.autos = copy_autos(e.get("autos", {}))
         f.intro_reset = True   # a look's Intros play from the start each time it loads
+        if f.mod == MOD_WAVE:   # the old Wave mode is now an automation on the Amount: same swell, more control
+            f.mod = MOD_OFF
+            f.autos.setdefault("amt", dict(shape=0, rate=1.0 / max(self.pipe.wave_rate, 0.01), unit=0,
+                                           lo=f.amt * 0.1, hi=f.amt, phase=0.0, band=0))
         f.listen = e.get("listen") if e.get("listen") in A.SOURCE_KEYS else None
         f.rng = [float(x) for x in e.get("rng", [80.0, 250.0])][:2]
         f.resp = [float(x) for x in e["resp"]][:2] if e.get("resp") else None
@@ -1945,6 +1974,9 @@ class App:
     # Spin: keeps going one way forever (Rotate wraps round seamlessly; other sliders run From -> To and start over).
     # Intro: when the effect comes on (or its look loads), glides From -> To over "Every", then holds there.
     INTRO_EASES = ["Smooth", "Fast start", "Slow start", "Linear"]
+    # what an Intro does once it arrives: hold, or carry on as a wave between To and "Then to"
+    INTRO_THEN = ["Hold", "Sine", "Triangle", "Ramp up", "Ramp down", "Square", "Random steps", "Smooth random", "Spin"]
+    THEN_SHAPES = [None, 0, 1, 2, 3, 4, 5, 6, 8]
     # position automation (the Centre): the path it floats along
     CENTRE_PATHS = ["Drift", "Orbit", "Figure 8", "Bounce", "Hop on the beat"]
 
@@ -2066,20 +2098,56 @@ class App:
                         f.xr = (turn * 360.0 + 360.0) % 720.0 - 360.0
                         continue
                     w = turn % 1.0
-                elif s == 9:   # intro: From -> To once, from when it came on, then hold
-                    st = self.auto_state.setdefault((f.uid, key, "intro"), [raw])
+                elif s == 9:   # intro: From -> To once, from when it came on; then hold, or hand over to a wave
+                    st = self.auto_state.setdefault((f.uid, key, "intro"), [raw, None])
                     u = min(1.0, max(0.0, raw - st[0]))
+                    then = a.get("then", 0)
+                    if u >= 1.0 and then:
+                        if st[1] is None:   # the moment it arrived: the wave starts from here
+                            st[1] = (t, tp.phase)
+                        rate2 = max(a.get("then_rate", 1.0), 0.01)
+                        unit2 = a.get("then_unit", 1)
+                        c2 = (t - st[1][0]) / rate2 if unit2 == 0 else \
+                            (tp.phase - st[1][1]) / (rate2 * (1 if unit2 == 1 else tp.beats_per_bar))
+                        s2 = self.THEN_SHAPES[min(then, len(self.THEN_SHAPES) - 1)]
+                        w2 = (c2 % 1.0) if s2 == 8 else self.wave(s2, c2, seed + 7)
+                        v = a["hi"] + (a.get("then_to", a["hi"]) - a["hi"]) * w2
+                        self.set_auto_value(f, key, v)
+                        continue
                     e = a.get("ease", 0)
                     w = u * u * (3 - 2 * u) if e == 0 else 1 - (1 - u) ** 3 if e == 1 else u ** 3 if e == 2 else u
                 else:
                     w = self.audio_drive(f, key, a, t)
-                v = a["lo"] + (a["hi"] - a["lo"]) * w
-                if key == "amt":
-                    f.amt = f.amt_smooth = v
-                elif key in ("opacity", "speed", "xs", "xr"):
-                    setattr(f, key, v)
-                elif key[:1] == "p" and key[1:].isdigit() and int(key[1:]) < len(f.pvals):
-                    f.pvals[int(key[1:])] = v
+                self.set_auto_value(f, key, a["lo"] + (a["hi"] - a["lo"]) * w)
+
+    @staticmethod
+    def set_auto_value(f, key, v):
+        if key == "amt":
+            f.amt = f.amt_smooth = v
+        elif key in ("opacity", "speed", "xs", "xr"):
+            setattr(f, key, v)
+        elif key[:1] == "p" and key[1:].isdigit() and int(key[1:]) < len(f.pvals):
+            f.pvals[int(key[1:])] = v
+
+    @staticmethod
+    def wave(s, cyc, seed):
+        """0..1 for the LFO shapes 0-6 at cycle position cyc."""
+        rnd = lambda i, sd: (math.sin(i * 12.9898 + sd * 78.233) * 43758.5453) % 1.0
+        x = cyc % 1.0
+        if s == 0:
+            return 0.5 - 0.5 * math.cos(2 * math.pi * x)
+        if s == 1:
+            return 1 - abs(2 * x - 1)
+        if s == 2:
+            return x
+        if s == 3:
+            return 1 - x
+        if s == 4:
+            return 1.0 if x < 0.5 else 0.0
+        if s == 5:
+            return rnd(math.floor(cyc), seed)
+        i, fr = math.floor(cyc), x
+        return rnd(i, seed) + (rnd(i + 1, seed) - rnd(i, seed)) * fr * fr * (3 - 2 * fr)
 
     def crossfade_look(self, data, style, seconds):
         """Build the look on the idle effect set and crossfade to it; the current look keeps running meanwhile."""

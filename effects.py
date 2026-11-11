@@ -89,7 +89,7 @@ uniform sampler2D u_tex, u_prev, u_clean;   // chain input, last output frame, u
 uniform vec2 u_res;
 uniform float u_time, u_amt, u_audio;
 uniform int u_opt0, u_opt1, u_opt2, u_opt3, u_opt4, u_opt5, u_opt6, u_opt7;  // per-effect dropdown choices
-uniform float u_p0, u_p1, u_p2, u_p3, u_p4, u_p5;            // per-effect extra sliders
+uniform float u_p0, u_p1, u_p2, u_p3, u_p4, u_p5, u_p6, u_p7;            // per-effect extra sliders
 uniform vec3 u_cols[8];                     // the effect's own colours, for the "Custom" palette
 uniform int u_ncols;                         // how many of them are in use (2..8)
 uniform vec3 u_bands;                        // bass, mid, high (0..1)
@@ -130,10 +130,11 @@ vec4 clean(vec2 uv){ return texture(u_clean, mirrorWrap(uv)); }
 mat2 rot(float a){ float c = cos(a), s = sin(a); return mat2(c,-s,s,c); }
 vec3 hueRot(vec3 c, float a){ const vec3 k = vec3(.57735); float ca = cos(a);
   return c*ca + cross(k,c)*sin(a) + k*dot(k,c)*(1.-ca); }
-float spectrum(float x){ return texture(u_audiotex, vec2(clamp(x, 0., 1.)*127./128. + .5/128., .125)).r; }
-float waveform(float x){ return texture(u_audiotex, vec2(clamp(x, 0., 1.)*127./128. + .5/128., .375)).r; }
-float waveL(float x){ return texture(u_audiotex, vec2(clamp(x, 0., 1.)*127./128. + .5/128., .625)).r; }
-float waveR(float x){ return texture(u_audiotex, vec2(clamp(x, 0., 1.)*127./128. + .5/128., .875)).r; }
+uniform float u_mute;   // 1 when this effect isn't listening to the music: it hears silence
+float spectrum(float x){ return texture(u_audiotex, vec2(clamp(x, 0., 1.)*127./128. + .5/128., .125)).r*(1. - u_mute); }
+float waveform(float x){ return texture(u_audiotex, vec2(clamp(x, 0., 1.)*127./128. + .5/128., .375)).r*(1. - u_mute); }
+float waveL(float x){ return texture(u_audiotex, vec2(clamp(x, 0., 1.)*127./128. + .5/128., .625)).r*(1. - u_mute); }
+float waveR(float x){ return texture(u_audiotex, vec2(clamp(x, 0., 1.)*127./128. + .5/128., .875)).r*(1. - u_mute); }
 // beat count that glides over ~0.2 s instead of jumping
 float beatGlide(){ return u_beats - 1. + smoothstep(0., .2, u_since); }
 """ + PALETTE_GLSL

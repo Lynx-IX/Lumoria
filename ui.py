@@ -4,6 +4,7 @@ import json
 import math
 import os
 import re
+import time
 import webbrowser
 from ctypes import wintypes
 
@@ -116,8 +117,11 @@ def music_toggle(f):
         tip = "Its amount stays where you set it. Its own music\nsettings still listen. Click to make the amount follow the music too"
     else:
         tip = "Not listening: the music doesn't touch this effect.\nClick to make it follow the music"
-    if icon_button(fa.ICON_FA_MUSIC, "mod", MAGENTA if on else alpha(DIM, .4), tip):
+    learning = bool(S.app and S.app.midi_learn)
+    if icon_button(fa.ICON_FA_MUSIC, "mod", MAGENTA if on else alpha(DIM, .4), tip) and not learning:
         f.mod = MOD_OFF if on else MOD_AUDIO
+    if learning:
+        midi_spot(S.app, (f.id, "mod"))
 
 TOPBAR_H, PLAYLIST_SHUT_H, LABEL_W, GAP = 54, 52, 96, 6   # GAP: draggable seam between panels
 SETTINGS_FILE = os.path.join(DATA, "ui_settings.json")
@@ -469,7 +473,13 @@ def typeable(widget, default_fmt=None):
             imgui.begin_disabled()
             changed, new = wrapped_inner(label_, value, *args, **kw)
             imgui.end_disabled()
-            midi_spot(S.app, target)
+            if target[1] == "centre":   # one widget, two values: the left half is x, the right half y
+                midi_spot(S.app, (target[0], "cx"), (0, 2))
+                midi_spot(S.app, (target[0], "cy"), (1, 2))
+            else:
+                midi_spot(S.app, target)
+            if target[0] != "app" and imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled)                     and imgui.is_mouse_clicked(1):
+                S.app.learn_target = (target[0], f"auto_{target[1]}")   # right-click: its automation on/off
             return False, value
         return wrapped_inner(label_, value, *args, **kw)
 
@@ -517,18 +527,23 @@ def typeable(widget, default_fmt=None):
 def slider_target(label_):
     """The MIDI target (scope, key) of a slider, from where it's drawn and its label; None if not mappable."""
     key = label_.lstrip("#")
-    if S.midi_scope and (key in ("amt", "opacity", "speed") or (key[:1] == "p" and key[1:].isdigit())):
+    if S.midi_scope and (key in ("amt", "opacity", "speed", "xs", "xr", "centre")
+                         or (key[:1] == "p" and key[1:].isdigit())):
         return (S.midi_scope, key)
-    if not S.midi_scope and key in ("gain", "ttime", "wave"):
+    if not S.midi_scope and key in ("gain", "ttime", "xfade"):
         return ("app", key)
     return None
 
 
-def midi_spot(app, target):
-    """MIDI learn on the control just drawn: outline it, tag it with its link, and pick it on click."""
+def midi_spot(app, target, part=None):
+    """MIDI learn on the control just drawn: outline it, tag it with its link, and pick it on click.
+    part = (i, n): the control holds n values side by side (Centre x / y) and this is the i-th of them."""
     if not app.midi_learn or target is None:
         return
     mn, mx = imgui.get_item_rect_min(), imgui.get_item_rect_max()
+    if part:
+        w = (mx.x - mn.x) / part[1]
+        mn, mx = V(mn.x + w * part[0] + (2 if part[0] else 0), mn.y), V(mn.x + w * (part[0] + 1) - 2, mx.y)
     dl = imgui.get_window_draw_list()
     chosen = app.learn_target == tuple(target)
     src = app.midi_binding(target)
@@ -542,7 +557,7 @@ def midi_spot(app, target):
         a = V(mx.x - tw - 8, mn.y - 7)
         dl.add_rect_filled(a, V(mx.x - 2, mn.y + 7), u32(BEZEL), 2)
         dl.add_text(S.bold, 11 * S.scale, V(a.x + 3, a.y + 1), u32(CYAN), tag)
-    if imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled) and imgui.is_mouse_clicked(0):
+    if imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled) and imgui.is_mouse_clicked(0) and             (not part or mn.x <= imgui.get_io().mouse_pos.x < mx.x + 2):
         app.learn_target = tuple(target)
 
 
@@ -862,6 +877,10 @@ def shortcuts(app):
         app.playlist_step(1) if S.auto_kind == AUTO_PLAYLIST else app.randomize()
     if pressed(imgui.Key.left_arrow):
         app.playlist_step(-1)
+    if pressed(imgui.Key.enter) or pressed(imgui.Key.keypad_enter):
+        app.take()
+    if pressed(imgui.Key.down_arrow) or pressed(imgui.Key.up_arrow):
+        app.cue_step(1 if pressed(imgui.Key.down_arrow) else -1)
     if pressed(imgui.Key.space):
         toggle_play(app)
     if pressed(imgui.Key.r):
@@ -913,6 +932,8 @@ def delete_prompt(app):
 
 
 KEYS = [("Looks", [("Click a tile", "fire that look"), ("<- / ->  or  N", "previous / next look"),
+                   ("Shift+click a tile", "cue it (line it up without firing)"),
+                   ("Up / Down", "cue the previous / next look"), ("Enter", "Take: bring the cued look on"),
                    ("Home / End", "first / last look"), ("Space", "play / pause the playlist"),
                    ("Delete", "delete the highlighted look (asks first)"), ("Ctrl+S", "save the chain as a new look"),
                    ("Ctrl+I / Ctrl+E", "import / export looks")]),
@@ -1287,10 +1308,30 @@ def midi_section(app):
         imgui.text_colored(DIM, "No MIDI inputs found. Plug a controller in, then Rescan.")
     if neon_button(f"{fa.ICON_FA_ROTATE}  Rescan##midi", DIM, V(sc(110), 0)):
         app.midi.open_all()
+        app.rescan_midi_out()
     imgui.same_line()
     if neon_button(f"{fa.ICON_FA_SLIDERS}  {'Finish learning' if app.midi_learn else 'MIDI learn'}##ml", AMBER,
                    V(-1, 0), app.midi_learn):
         app.midi_learn, app.learn_target = not app.midi_learn, None
+    imgui.spacing()
+    bold("Button lights", 13)
+    if imgui.is_item_hovered():
+        imgui.set_tooltip("Tick a controller to light its linked buttons and pads to match: on / off switches,\n"
+                          "the music note, paused automations, play, record and the current look.\n"
+                          "Lumoria sends the same note or CC the button sends (127 lit, 0 dark), which\n"
+                          "lights most controllers (e.g. the MIDI Mix). Leave synths and interfaces unticked.")
+    imgui.text_colored(DIM, "Light the linked buttons on:")
+    errors = {n: e for n, _h, e in app.midi_out.ports if e}
+    outs = [n for n in app.out_names if "GS Wavetable" not in n]   # Windows' built-in synth: it would just play notes
+    for name in outs:
+        changed, on = imgui.checkbox(f"{name}##lt", name in app.light_ports)
+        if changed:
+            app.set_light_port(name, on)
+        if name in errors:
+            imgui.same_line()
+            imgui.text_colored(RED, errors[name])
+    if not outs:
+        imgui.text_colored(DIM, "No MIDI outputs found.")
     imgui.spacing()
     if not app.midi_map:
         imgui.text_colored(DIM, "No links yet. MIDI learn, click a control, move a knob.")
@@ -2318,6 +2359,13 @@ def automation_menu(app, f, key, lo, hi, name):
         else:
             f.autos.pop(key, None)
             a = None
+    if a:
+        flipped, paused = imgui.checkbox("Paused", bool(a.get("paused")))
+        if flipped:
+            a["paused"] = paused
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("Hold it where it is, keeping these settings (a MIDI button can do this too:\n"
+                              "MIDI learn, click the Automate button, then press the button on your controller)")
     if a and key == "centre":
         centre_auto_controls(app, f, a, sc(300))
     elif a:
@@ -2400,17 +2448,26 @@ def auto_button(app, f, key, name):
         return
     a = f.autos.get(key)
     heard = bool(a) and a.get("shape") == 7
+    paused = bool(a) and bool(a.get("paused"))
     col = (MAGENTA if heard else CYAN) if a else alpha(DIM, .55)
-    icon = fa.ICON_FA_MUSIC if heard else fa.ICON_FA_WAVE_SQUARE
-    if a:   # a lit button: a soft glow behind the glyph
+    icon = fa.ICON_FA_PAUSE if paused else fa.ICON_FA_MUSIC if heard else fa.ICON_FA_WAVE_SQUARE
+    if paused:
+        col = alpha(col, .6)
+    if a and not paused:   # a lit button: a soft glow behind the glyph
         p, h = imgui.get_cursor_screen_pos(), imgui.get_frame_height()
         imgui.get_window_draw_list().add_rect_filled(p, V(p.x + sc(28), p.y + h), u32(alpha(col, .16)), 3)
-    if a:
+    if paused:
+        tip = f"{name}: automation paused, held where it is" + chr(10) + "Click to change it"
+    elif a:
         tip = (f"{name}: follows the music" if heard else f"{name}: moving on its own") + chr(10) + "Click to change it"
     else:
         tip = f"Automate {name}: make it move on its own" + chr(10) + "(an LFO in time with the tempo) or follow the music"
-    if icon_button(icon, f"ab_{key}", col, tip, hover_col=col):
+    learning = app.midi_learn
+    if learning:
+        tip = f"MIDI learn: click, then press a button to pause / resume {name}'s automation"
+    if icon_button(icon, f"ab_{key}", col, tip, hover_col=col) and not learning:
         imgui.open_popup(f"auto_{key}")
+    midi_spot(app, (f.id, f"auto_{key}"))
 
 
 def centre_auto_controls(app, f, a, w):
@@ -2780,9 +2837,6 @@ def transitions_section(app):
     if pipe.transition != 2:
         label("Time")
         pipe.trans_time, pipe.trans_unit = time_with_unit(app, "ttime", pipe.trans_time, pipe.trans_unit)
-    label("Wave speed")
-    _, pipe.wave_rate = slider_float("##wave", pipe.wave_rate, 0.02, 2.0, "%.2f Hz",
-                                           imgui.SliderFlags_.logarithmic)
 
 
 def output_section(app):
@@ -2883,7 +2937,7 @@ def preview(app):
     if app.midi_learn:   # what to do, and what's picked
         c = app.midi_control(app.learn_target) if app.learn_target else None
         text = (f"MIDI LEARN   {c[5]}  -  now move a knob / fader or hit a pad" if c else
-                "MIDI LEARN   click a control (slider, dropdown, power, look tile, play / next / prev)")
+                "MIDI LEARN   click a control (slider, dropdown, power, music note, Automate, look tile, play / next / prev)")
         imgui.push_font(S.bold, 13)
         tw = imgui.calc_text_size(text).x
         imgui.pop_font()
@@ -3162,18 +3216,19 @@ def tempo_strip(app):
     # launch quantize too, if there's room before the buttons on the right (always in Settings > Tempo)
     room = (imgui.get_window_width() - 16 - sc(130) - 2 * (sc(44) + 6)
             - (imgui.get_item_rect_max().x - imgui.get_window_pos().x))
-    if room < sc(230):
+    if room < sc(320):
         return
     imgui.same_line(0, 14)
     imgui.align_text_to_frame_padding()
     imgui.text_colored(DIM, "launch")
     imgui.same_line()
-    q = segmented("launch", ("now", "beat", "bar"), app.quantize, AMBER, sc(150))
+    q = segmented("launch", ("now", "beat", "bar", "4", "8", "16"), app.quantize, AMBER, sc(240))
     if q != app.quantize:
         app.quantize, app.pending_look = q, None
     if imgui.is_item_hovered():
-        imgui.set_tooltip("When a look you fire starts: straight away, or on the next beat or bar\n"
-                          "(clicks, MIDI pads, arrow keys and auto-play)")
+        imgui.set_tooltip("When a look you fire starts: straight away, on the next beat or bar, or at the start\n"
+                          "of the next 4, 8 or 16-bar phrase (clicks, Take, MIDI pads, arrow keys and auto-play).\n"
+                          "Phrases count from beat 1: press B on a downbeat if they land in the wrong place.")
 
 
 def tempo_section(app):
@@ -3194,12 +3249,26 @@ def tempo_section(app):
         tp.bpm = bpm
         if tp.source != tempo.MIDI_CLOCK:
             tp.source = tempo.MANUAL
+    if tp.source == tempo.AUDIO:
+        label("Feel")
+        mults = (0.5, 1.0, 2.0)
+        m = segmented("tmult", ("Half time", "As heard", "Double"), mults.index(tp.mult) if tp.mult in mults else 1,
+                      CYAN)
+        if mults[m] != tp.mult:
+            tp.bpm *= mults[m] / tp.mult
+            tp.mult = mults[m]
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("If the beat feels twice too fast or too slow (common with drum & bass,\n"
+                              "trap or half-time grooves), switch it here; the beats stay on the music's grid")
     label("Beats / bar")
     tp.beats_per_bar = segmented("tbar", ("3", "4", "5", "6", "7"), tp.beats_per_bar - 3, VIOLET) + 3
     label("Launch looks")
-    q = segmented("tlaunch", ("At once", "Next beat", "Next bar"), app.quantize, AMBER)
+    q = segmented("tlaunch", ("Now", "Beat", "Bar", "4", "8", "16"), app.quantize, AMBER)
     if q != app.quantize:
         app.quantize, app.pending_look = q, None
+    if imgui.is_item_hovered():
+        imgui.set_tooltip("When a look starts: at once, on the next beat or bar, or at the start of the next\n"
+                          "4, 8 or 16-bar phrase (counted from beat 1: press B on a downbeat to set it)")
     imgui.spacing()
     bw = (imgui.get_content_region_avail().x - 6) / 2
     if neon_button(f"{fa.ICON_FA_HAND_POINTER}  Tap  [T]##ttap", CYAN, V(bw, 0)) and not app.midi_learn:
@@ -3215,8 +3284,16 @@ def tempo_section(app):
     imgui.dummy(V(1, sc(20)))
     imgui.push_text_wrap_pos(0)
     if tp.source == tempo.AUDIO:
-        imgui.text_colored(DIM, f"Following the bass of {app.audio.device_name}." if app.audio.stream else
-                           "No audio input (Effects tab > Audio): running steadily at this BPM.")
+        heard = tp.locked_at is not None and time.perf_counter() - tp.locked_at < 2.0
+        if not app.audio.stream:
+            imgui.text_colored(DIM, "No audio input (Effects tab > Audio): running steadily at this BPM.")
+        elif not heard:
+            imgui.text_colored(AMBER, f"Listening to {app.audio.device_name} for the beat (a few seconds of music)...")
+        elif tp.lock < 0.15:
+            imgui.text_colored(DIM, f"Locked loosely at {tp.bpm:.1f} BPM: little steady beat in the music right now, "
+                                    "so it keeps time on its own.")
+        else:
+            imgui.text_colored(CYAN, f"Locked to the music: {tp.bpm:.1f} BPM.  Press B on a downbeat to set beat 1.")
     elif tp.source == tempo.MIDI_CLOCK:
         imgui.text_colored(CYAN if tp.clock_running else AMBER,
                            "Receiving MIDI clock." if tp.clock_running else
@@ -3305,10 +3382,74 @@ def thumb_texture(app, name):
     return tex
 
 
+def deck(app):
+    """Beside the tiles: what's cued (or waiting / fading), the crossfader with what's at each end, and Take.
+    The fader's start is whichever end it sits nearer once a fade is done, so after a full fade the next look
+    comes in on the way back (like A / B decks)."""
+    imgui.push_style_var(imgui.StyleVar_.item_spacing, V(4, 3))
+    imgui.begin_child("deck", V(sc(232), 0), imgui.ChildFlags_.borders,
+                      imgui.WindowFlags_.no_scrollbar | imgui.WindowFlags_.no_scroll_with_mouse)
+    on_air = app.xf_live[0] if app.xf_live else app.current_preset
+    left, right = (on_air, app.cued) if app.xf_dir > 0 else (app.cued, on_air)
+    w = imgui.get_content_region_avail().x
+    take_on = tempo.LAUNCH[app.quantize]
+    # the top line: waiting for its beat / phrase, fading, cued, or how to cue
+    if app.pending_look:
+        left_beats = max(0.0, app.pending_look[1] - app.tempo.phase)
+        bars, beats = divmod(math.ceil(left_beats), app.tempo.beats_per_bar)
+        when = (f"{bars} bar{'s' if bars != 1 else ''}" + (f" {beats}" if beats else "")
+                if bars else f"{beats} beat{'s' if beats != 1 else ''}")
+        line, col = f"{fa.ICON_FA_HOURGLASS_HALF}  {app.pending_look[0]} in {when}", AMBER
+    elif app.xf_live:
+        prog = app.xfader if app.xf_dir > 0 else 1 - app.xfader
+        line, col = f"{fa.ICON_FA_SHUFFLE}  Fading {round(prog * 100)}%: Take finishes it", VIOLET
+    elif app.cued:
+        line, col = f"{fa.ICON_FA_FORWARD}  {app.cued}", VIOLET
+    else:
+        line, col = "Shift-click a look to cue it", DIM
+    imgui.text_colored(col, line)
+    # the fader, with what's at each end (on air magenta, cued violet)
+    clip = lambda s: "-" if not s else (s if len(s) <= 13 else s[:12] + "...")
+    imgui.push_font(S.font, 12)
+    imgui.text_colored(MAGENTA if left == on_air else VIOLET, clip(left))
+    rt = clip(right)
+    imgui.same_line(w - imgui.calc_text_size(rt).x)
+    imgui.text_colored(MAGENTA if right == on_air else VIOLET, rt)
+    imgui.pop_font()
+    imgui.set_next_item_width(w)
+    changed, v = slider_float("##xfade", app.xfader * 100, 0.0, 100.0, "%.0f%%")
+    if changed:
+        app.set_xfader(v / 100)
+    if imgui.is_item_hovered():
+        imgui.set_tooltip("Crossfader: slide toward the cued look to fade it in by hand; at the far end it's on air,\n"
+                          "and the next cued look comes in on the way back.\n"
+                          "Map it to a MIDI fader (MIDI learn, click here, move the fader).")
+    bw = sc(30)
+    if icon_button(fa.ICON_FA_CHEVRON_UP, "cueprev", DIM, "Cue the previous look [Up]", V(bw, 0))             and not app.midi_learn:
+        app.cue_step(-1)
+    midi_spot(app, ("app", "cue_prev"))
+    imgui.same_line()
+    if icon_button(fa.ICON_FA_CHEVRON_DOWN, "cuenext", DIM, "Cue the next look [Down]", V(bw, 0))             and not app.midi_learn:
+        app.cue_step(1)
+    midi_spot(app, ("app", "cue_next"))
+    imgui.same_line()
+    label_ = "Take" if not app.quantize else f"Take: {take_on if app.quantize > 1 else 'beat'}"
+    if neon_button(f"{fa.ICON_FA_PLAY}  {label_}##take", VIOLET, V(-1, 0), bool(app.cued or app.xf_live),
+                   "Bring the cued look on with its own transition, "
+                   + ("at once" if not app.quantize else f"at the start of the next {take_on if app.quantize > 1 else 'beat'}")
+                   + " (set by launch) [Enter]") and not app.midi_learn:
+        app.take()
+    midi_spot(app, ("app", "take"))
+    imgui.end_child()
+    imgui.pop_style_var()
+
+
 def tiles(app, panel_h):
     # fixed-size tiles that wrap into more rows as the panel gets taller (scroll for the rest)
     th = sc(96)
     tile = V(th * 1.6, th)
+    deck(app)
+    imgui.same_line(0, 10)
     imgui.begin_child("tiles", V(0, 0))
     per_row = max(1, int((imgui.get_content_region_avail().x + 10) // (tile.x + 10)))
     move = None
@@ -3318,7 +3459,10 @@ def tiles(app, panel_h):
         active = name == app.current_preset
         imgui.push_id(f"tile{name}")
         if imgui.invisible_button("##tile", tile) and not app.midi_learn:
-            app.load_preset(name)
+            if imgui.get_io().key_shift:
+                app.cue(None if app.cued == name else name)
+            else:
+                app.load_preset(name)
         midi_spot(app, ("look", name))
         mn, mx = imgui.get_item_rect_min(), imgui.get_item_rect_max()
         dl = imgui.get_window_draw_list()
@@ -3347,6 +3491,13 @@ def tiles(app, panel_h):
                     name if len(name) <= 16 else name[:15] + "...")
         imgui.pop_font()
         led(dl, V(mx.x - sc(16), mn.y + sc(17)), CYAN, active, 3.5)   # lit on the look that's playing
+        if app.cued == name:   # lined up to go next
+            dl.add_rect(V(mn.x + 1, mn.y + 1), V(mx.x - 1, mx.y - 1), u32(VIOLET), rounding=4, thickness=2)
+            imgui.push_font(S.bold, 11)
+            cw = imgui.calc_text_size("CUED").x
+            imgui.pop_font()
+            dl.add_rect_filled(V(mx.x - cw - sc(34), mn.y + sc(10)), V(mx.x - sc(26), mn.y + sc(24)), u32(VIOLET), 2)
+            dl.add_text(S.bold, 11 * S.scale, V(mx.x - cw - sc(30), mn.y + sc(11)), u32(BEZEL), "CUED")
         if app.pending_look and app.pending_look[0] == name:   # fired, waiting for its beat / bar
             left = app.pending_look[1] - app.tempo.phase
             pulse = .5 + .5 * math.cos(app.tempo.phase * 6.2832)
@@ -3382,6 +3533,9 @@ def tiles(app, panel_h):
         if imgui.begin_popup_context_item("tilemenu"):
             bold(name, 15)
             imgui.separator()
+            if imgui.selectable(f"{fa.ICON_FA_FORWARD}   " + ("Uncue" if app.cued == name else "Cue (line it up to go next)"),
+                                False)[0]:
+                app.cue(None if app.cued == name else name)
             if imgui.selectable(f"{fa.ICON_FA_WAND_MAGIC_SPARKLES}   Transition...", False)[0]:
                 S.meta_open = name
             if imgui.selectable(f"{fa.ICON_FA_FLOPPY_DISK}   Overwrite with current look", False)[0]:

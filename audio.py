@@ -8,10 +8,13 @@ Effects that set their own attack / release follow target with their own smoothi
 """
 import math
 import threading
+import time
 from collections import deque
 
 import numpy as np
 import sounddevice as sd
+
+import tempo
 
 BANDS = {"bass": (20, 160), "mid": (160, 2000), "high": (2000, 10000)}
 SPEC_N = 128   # spectrum bands / waveform points handed to the shaders
@@ -116,6 +119,10 @@ class AudioAnalyzer:
         self.hit_t = {k: -10.0 for k in HITS}
         self.last_kick = -10.0
         self._t = None
+        # the music's own tempo and beat (tempo.BeatTracker, on the audio thread): (bpm, confidence, seconds
+        # since its last beat, time.perf_counter() then, estimate count), or None until it has heard enough
+        self.beat_est = None
+        self.beat_mult = 1.0   # double / half time (the tempo clock's choice): the tracker places beats on that grid
 
     def open(self, device, name):
         self.close()
@@ -156,6 +163,8 @@ class AudioAnalyzer:
         lo_bin = np.searchsorted(freqs, edges[:-1])
         hi_bin = np.maximum(np.searchsorted(freqs, edges[1:]), lo_bin + 1)
         onsets = {k: Onset(r) for k, r in REFRACTORY.items()}
+        tracker = tempo.BeatTracker()
+        self.beat_est = None
         kicks = deque(maxlen=8)   # recent kick strengths, to tell the big ones
         state = dict(prev=None, samples=0, peak=0.0, peak_hops=0)
         feat = dict(bal=0.0, width=0.0, bright=0.0, busy=0.0)
@@ -213,6 +222,11 @@ class AudioAnalyzer:
                 # it only counts when it reaches nearly the band's recent peak (a quiet mix is judged the same)
                 onsets["snare"].floor = 0.95 - 0.2 * sens
                 lvl = float(comp[det["kick"]].mean())
+                # the tempo tracker's envelope: rises across the mix, the kick's range counting double
+                tracker.mult = self.beat_mult
+                if tracker.push(now, float(rise[busy_bins].mean()) + 2.0 * flux["kick"]) and tracker.bpm:
+                    with self._lock:
+                        self.beat_est = (tracker.bpm, tracker.conf, tracker.since, time.perf_counter(), tracker.count)
                 if onsets["kick"].step(flux["kick"], now, delta):
                     hits.append("kick")
                     state["peak"], state["peak_hops"] = lvl, 3   # watch how loud it gets over ~30 ms

@@ -32,7 +32,11 @@ file. Build looks, line them up in a playlist and fire them live, on the beat.
 - **Outputs**: Spout (full quality, straight from the GPU, transparency included), an output window for OBS
   window capture, the OBS Virtual Camera, and recording to MP4 / MOV with sound on the graphics card's encoder.
 - **Made for performing**: MIDI learn for any control, undo / redo, crash recovery, themes and a console-style
-  interface.
+  interface. MIDI learn covers each effect's Scale, Rotate and Centre (click the left half of Centre for x, the
+  right half for y) and its music note. Click a slider's Automate button, or right-click the slider, to link a
+  button that pauses and resumes its automation without losing the settings. *Settings > MIDI > Button lights*:
+  tick a controller and its linked buttons light up to match. Lumoria echoes the button's own note or CC, which
+  works on controllers like the MIDI Mix.
 
 ![3D effects: Mandelbulb, an endless Menger sponge dive, the Visionary hall and the Colonnade](docs/screenshot-3d.jpg)
 
@@ -178,11 +182,23 @@ The same wave button (lit cyan while it moves) offers, besides Audio:
 
 ## Tempo
 One beat clock drives beat effects, auto-play and look timing (Settings > Tempo; live in the playlist bar).
-Source: **Audio** (follows the bass, steady through quiet parts), **Tap** (`T`, the TAP button or a MIDI pad),
+Source: **Audio** locks to the music's own tempo and beat. It needs a few seconds to settle, then keeps steady time
+through quiet parts. If the beat feels twice too fast or too slow (drum & bass, trap), set *Feel* to Half time or
+Double. **Tap** (`T`, the TAP button or a MIDI pad),
 **Manual** BPM, or **MIDI clock** from a DAW (send clock to a MIDI port Lumoria can see; for a DAW on this PC a
 virtual port such as loopMIDI; Start = beat 1). `B` makes the current beat beat 1 of the bar. Transition times,
 a look's stay time and the auto-play interval can be in **seconds, beats or bars**. **Launch** (now / beat /
-bar) makes a fired look wait for the next beat or bar, with a countdown on its tile.
+bar / 4 / 8 / 16) makes a fired look wait for the next beat, bar, or 4, 8 or 16-bar phrase, with a countdown on
+its tile. Phrases count from beat 1, so press `B` on a downbeat if they land in the wrong place.
+
+## Cue, Take and the crossfader
+Beside the look tiles: **Shift-click** a tile (or right-click > Cue, or `Up` / `Down`) to line a look up without
+firing it. **Take** (`Enter`) brings it on with its own transition, on the Launch beat, bar or phrase. You can also
+fade it in by hand with the **crossfader**: slide it toward the cued look and the picture blends as you go. At the
+far end the cued look is on air and the fader's ends swap, so the next cued look comes in on the way back. Morph
+and Cut looks fade as Dissolve under the fader. Take mid-fade finishes the fade from where the fader is. Firing
+another look, or cueing a different one, puts the on-air look back. MIDI learn covers the crossfader, Take and
+Cue next / previous; with Button lights on, Take lights up while something is cued.
 
 ## Mirror Slice
 Mirrors the picture (left-right, up-down or both, as a 2x2 grid), cuts it into strips and lays them outside-in
@@ -276,7 +292,8 @@ Strength blends either one with the original.
 
 ## Keys (control window)
 `F1` shows them all in the app.
-- **Looks:** `←` / `→` (or `N`) previous / next · `Home` / `End` first / last · `Space` play / pause the playlist ·
+- **Looks:** `←` / `→` (or `N`) previous / next · `Shift`+click a tile to cue it · `↑` / `↓` cue previous / next ·
+  `Enter` Take · `Home` / `End` first / last · `Space` play / pause the playlist ·
   `Delete` delete the highlighted look (asks first: `Enter` deletes, `Esc` keeps it) · `Ctrl+S` save the chain as
   a new look · `Ctrl+I` / `Ctrl+E` import / export looks
 - **Effects:** `1`–`0` toggle the first ten effects · `X` randomize · `C` clear · `Ctrl+Z` / `Ctrl+Y` undo / redo

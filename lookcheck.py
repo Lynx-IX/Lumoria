@@ -52,7 +52,8 @@ def _pair(v, default, lo=-1e6, hi=1e6):
 _AUTO_FIELDS = dict(shape=("int", 0), rate=("num", 1.0), unit=("int", 2), lo=("num", 0.0), hi=("num", 1.0),
                     phase=("num", 0.0), band=("int", 0), dir=("int", 0), ease=("int", 0), then=("int", 0),
                     then_to=("num", 1.0), then_rate=("num", 1.0), then_unit=("int", 1), gain=("num", 1.0),
-                    gate=("num", 0.0), curve=("num", 0.0), path=("int", 0), size=("num", 0.2))
+                    gate=("num", 0.0), curve=("num", 0.0), path=("int", 0), size=("num", 0.2),
+                    paused=("int", 0))
 
 
 def _auto(a):

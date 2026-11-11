@@ -51,6 +51,7 @@ from sources import (CameraSource, VideoFileSource, describe, list_cameras, list
 PRESET_DIR = os.path.join(DATA, "presets")
 PLAYLIST_FILE = os.path.join(PRESET_DIR, "_playlist.json")
 MIDI_FILE = os.path.join(DATA, "midi_map.json")   # MIDI mappings (global, not per look)
+MIDI_OUT_FILE = os.path.join(DATA, "midi_out.json")   # which MIDI outputs get button lights (see midi_feedback)
 RUNNING_FILE = os.path.join(DATA, ".running")   # exists while Lumoria runs (see App.unclean)
 VCAM_FPS = 60
 DEFAULT_COLOURS = [(1.0, 0.16, 0.6), (0.55, 0.2, 1.0), (0.0, 0.9, 1.0)]   # starting "Custom" palette
@@ -767,7 +768,10 @@ class Pipeline:
         self._frame = dict(t=t, dt=dt, level=level, style=style, step=1.0 if cut else dt / max(ttime, 0.01),
                            glide=1.0 if cut else min(1.0, dt * 3 / max(ttime, 0.01)))
         og = self.outgoing
-        p = min(1.0, (t - og["start"]) / max(og["dur"], 0.01)) if og else 1.0
+        if og and og.get("manual"):   # the crossfader holds it where the fader is (App.crossfader_step)
+            p = og["p"]
+        else:
+            p = min(1.0, (t - og["start"]) / max(og["dur"], 0.01)) if og else 1.0
         if og and p >= 1.0:   # crossfade finished: the old look's effects go idle
             for f in walk(og["order"]):
                 f.on, f.mix, f.removing = False, 0.0, False
@@ -1212,6 +1216,11 @@ class App:
         self.tempo = tempo.Tempo()   # the beat clock (tempo.py): beat effects, auto-play, look timing in beats/bars
         self.quantize = 0            # launching a look: 0 at once, 1 on the next beat, 2 on the next bar
         self.pending_look = None     # (name, beat it starts on) while a quantized launch waits
+        # cue and crossfader: a look lined up without firing, then Taken (on the launch beat / bar / phrase) or
+        # faded in by hand. The fader's direction flips each time it brings a look fully in, like A / B decks.
+        self.cued = None
+        self.xfader, self.xf_dir, self.xf_armed = 0.0, 1, True
+        self.xf_live = None          # while the fader is part-way: (look it came from, band, gain) to go back to
         self.picking, self.pick_dragging = None, False   # effect whose centre is being placed on the preview
         self.segmenter, self.seg_error_shown = None, False  # AI person mask, started on first use
         self.mask_quality = 1   # index into segment.QUALITY
@@ -1227,6 +1236,10 @@ class App:
             print(f"[Lumoria] MIDI unavailable: {e}", flush=True)
         self.midi_map = self.load_midi_map()   # [{"src": [kind, channel, number], "target": [scope, key]}]
         self.midi_learn, self.learn_target, self.midi_seen, self.midi_cc = False, None, 0.0, {}
+        # button lights: sent only to the outputs ticked in Settings > MIDI (a synth on another port never hears it)
+        self.midi_out, self.lights_sent, self.out_names = midi.MidiOut(), {}, []
+        self.light_ports = self.load_light_ports()
+        self.rescan_midi_out()
         # notice when Lumoria's own code changes on disk, so a stale copy doesn't keep running
         self.code_stamp, self.code_check_t = code_stamp(), 0.0
         self.update_ready, self.restart_requested = False, False
@@ -1568,7 +1581,8 @@ class App:
     def load_midi_map(self):
         try:
             with open(MIDI_FILE) as fh:
-                return [m for m in json.load(fh) if len(m.get("src", [])) == 3 and len(m.get("target", [])) == 2]
+                return [m for m in json.load(fh) if len(m.get("src", [])) == 3 and len(m.get("target", [])) == 2
+                        and m["target"] != ["app", "wave"]]   # Wave speed: retired with Wave mode
         except (OSError, ValueError, AttributeError):
             return []
 
@@ -1577,6 +1591,69 @@ class App:
             save_json(MIDI_FILE, self.midi_map)
         except OSError:
             pass
+
+    def load_light_ports(self):
+        try:
+            with open(MIDI_OUT_FILE) as fh:
+                return [n for n in json.load(fh).get("lights", []) if isinstance(n, str)]
+        except (OSError, ValueError, AttributeError):
+            return []
+
+    def rescan_midi_out(self):
+        """List the MIDI outputs again and reopen the ones ticked for button lights."""
+        self.lights_off()
+        try:
+            self.out_names = midi.list_out_ports()
+            self.midi_out.open(self.light_ports)
+        except Exception as e:   # no MIDI system: the rest of the app doesn't need it
+            print(f"[Lumoria] MIDI output unavailable: {e}", flush=True)
+
+    def set_light_port(self, name, on):
+        """Tick or untick an output port for button lights (Settings > MIDI); remembered by its name."""
+        self.lights_off()
+        self.light_ports = [n for n in self.light_ports if n != name] + ([name] if on else [])
+        try:
+            save_json(MIDI_OUT_FILE, dict(lights=self.light_ports))
+        except OSError:
+            pass
+        self.midi_out.open(self.light_ports)
+        self.lights_sent = {}   # everything is sent afresh to the newly opened ports
+
+    def midi_lit(self, target):
+        """Whether a linked control's button light should be on, or None for controls without a light
+        (knobs, faders and one-shot buttons)."""
+        scope, key = target
+        if scope == "look":
+            return self.current_preset == key
+        if scope == "app":
+            return {"play": lambda: bool(self.auto_mode), "record": lambda: self.recorder.recording,
+                    "take": lambda: bool(self.cued or self.xf_live)}.get(key, lambda: None)()
+        c = self.midi_control(target)
+        return bool(c[3]()) if c and c[0] == "toggle" else None
+
+    def midi_feedback(self):
+        """Light the controller's buttons to match what they switch: sends a note-on (127 lit, 0 dark) or a CC
+        (127 / 0), the same kind and number the button sends, and only when a light changes."""
+        if not self.midi_out.active:
+            return
+        now = {}
+        for m in self.midi_map:
+            lit = self.midi_lit(tuple(m["target"]))
+            if lit is not None:
+                now[tuple(m["src"])] = 127 if lit else 0
+        for src in [s for s in self.lights_sent if s not in now]:   # unlinked: its light goes out, then forgotten
+            if self.lights_sent.pop(src):
+                self.midi_out.send(*src, 0)
+        for src, val in now.items():
+            if self.lights_sent.get(src) != val:
+                self.midi_out.send(*src, val)
+                self.lights_sent[src] = val
+
+    def lights_off(self):
+        for src, val in self.lights_sent.items():
+            if val:
+                self.midi_out.send(*src, 0)
+        self.lights_sent = {}
 
     def midi_binding(self, target):
         """The MIDI source linked to a control, or None."""
@@ -1590,7 +1667,9 @@ class App:
     def midi_control(self, target):
         """What a mappable control is: (kind, lo, hi, get, set or fire, label), or None if it doesn't exist.
         target = (scope, key): an effect id ("edges", "edges#2") with amt / opacity / speed / p<i> / opt<i> /
-        on; "app" with gain / ttime / wave / prev / next / play / random / clear; or "look" with a look's name."""
+        on / xs / xr / cx / cy (Scale, Rotate, Centre x and y) / mod (its music switch) / auto_<key> (pause or
+        resume that slider's automation); "app" with gain / ttime / prev / next / play / random / clear / tap /
+        record / resync; or "look" with a look's name."""
         scope, key = target
         p = self.pipe
         if scope == "look":
@@ -1604,13 +1683,16 @@ class App:
                 "gain": ("range", 0.2, 3.0, lambda: self.gain, lambda v: setattr(self, "gain", v), "Audio sensitivity"),
                 "ttime": ("range", 0.1, 5.0, lambda: p.trans_time, lambda v: setattr(p, "trans_time", v),
                           "Transition time"),
-                "wave": ("range", 0.02, 2.0, lambda: p.wave_rate, lambda v: setattr(p, "wave_rate", v), "Wave speed"),
                 "prev": ("trigger", 0, 1, None, lambda: self.playlist_step(-1), "Previous look"),
                 "next": ("trigger", 0, 1, None, lambda: self.playlist_step(1), "Next look"),
                 "play": ("trigger", 0, 1, None, play, "Play / pause"),
                 "random": ("trigger", 0, 1, None, self.randomize, "Random look"),
                 "clear": ("trigger", 0, 1, None, self.clear, "Clear all effects"),
                 "tap": ("trigger", 0, 1, None, lambda: self.tempo.tap(glfw.get_time()), "Tap tempo"),
+                "xfade": ("range", 0.0, 1.0, lambda: self.xfader, self.set_xfader, "Crossfader"),
+                "take": ("trigger", 0, 1, None, self.take, "Take (bring the cued look on)"),
+                "cue_next": ("trigger", 0, 1, None, lambda: self.cue_step(1), "Cue next look"),
+                "cue_prev": ("trigger", 0, 1, None, lambda: self.cue_step(-1), "Cue previous look"),
                 "record": ("trigger", 0, 1, None, self.toggle_record, "Record on / off"),
                 "resync": ("trigger", 0, 1, None, self.tempo.resync_bar, "Beat 1 (re-sync bar)"),
             }.get(key)
@@ -1627,6 +1709,34 @@ class App:
             return attr("speed", -3.0, 3.0, "Speed")
         if key == "on":
             return ("toggle", 0, 1, lambda: f.on, lambda v: setattr(f, "on", v), f"{f.name} · On/off")
+        if key == "mod":
+            return ("toggle", 0, 1, lambda: f.mod == MOD_AUDIO,
+                    lambda v: setattr(f, "mod", MOD_AUDIO if v else MOD_OFF), f"{f.name} · Music on/off")
+        if key == "xs" and f.xform:   # a knob runs along the slider's log scale, so 1x sits near the middle
+            lo, hi = math.log(0.1), math.log(8.0)
+            return ("range", 0.0, 1.0, lambda: (math.log(max(f.xs, 0.1)) - lo) / (hi - lo),
+                    lambda v: setattr(f, "xs", math.exp(lo + (hi - lo) * v)), f"{f.name} · Scale")
+        if key == "xr" and f.xform:
+            return attr("xr", -360.0, 360.0, "Rotate")
+        if key in ("cx", "cy") and f.has_centre:
+            i = key == "cy"
+            def put_centre(v):
+                f.centre = list(f.centre)
+                f.centre[i] = v
+                if "centre" in f.autos:   # floating: it moves the point it floats round, as the slider does
+                    base = list(f.autos["centre"].get("base", [0.5, 0.5]))
+                    base[i] = v
+                    f.autos["centre"]["base"] = base
+            return ("range", 0.0, 1.0, lambda: f.centre[i], put_centre, f"{f.name} · Centre {'y' if i else 'x'}")
+        if key[:5] == "auto_" and self.automatable(f, key[5:]):
+            k = key[5:]
+            def put_auto(v):
+                if k in f.autos:   # pausing keeps every setting; with no automation set up there's nothing to do
+                    f.autos[k]["paused"] = not v
+            name = {"amt": f.amt_label or "Amount", "opacity": "Opacity", "speed": "Speed", "xs": "Scale",
+                    "xr": "Rotate", "centre": "Centre"}.get(k) or f.params[int(k[1:])][0]
+            return ("toggle", 0, 1, lambda: k in f.autos and not f.autos[k].get("paused"), put_auto,
+                    f"{f.name} · {name} automation")
         if key[:1] == "p" and key[1:].isdigit() and int(key[1:]) < len(f.params):
             j = int(key[1:])
             name, _d, lo, hi, _fmt = f.params[j]
@@ -1637,6 +1747,19 @@ class App:
             return ("index", 0, len(choices) - 1, lambda: f.opts[j], lambda v: f.opts.__setitem__(j, v),
                     f"{f.name} · {name}")
         return None
+
+    @staticmethod
+    def automatable(f, key):
+        """Whether f has a slider with this key that can move on its own."""
+        if key in ("amt", "opacity"):
+            return True
+        if key == "speed":
+            return f.has_speed
+        if key in ("xs", "xr"):
+            return f.xform
+        if key == "centre":
+            return f.has_centre
+        return key[:1] == "p" and key[1:].isdigit() and int(key[1:]) < len(f.params)
 
     def handle_midi(self, msg, t):
         kind, ch, num, val = msg
@@ -1828,6 +1951,82 @@ class App:
                 return m["hold"], m["unit"]
         return self.auto_every, self.auto_unit
 
+    # --- cue, Take and the crossfader
+    def cue(self, name):
+        """Line a look up to go next (Shift-click or right-click a tile, a MIDI pad), without firing it."""
+        if self.xf_live:
+            self.cancel_fade()
+        self.cued = name if name in self.playlist else None
+
+    def cue_step(self, direction=1):
+        """Cue the next / previous look in the playlist (from the cued one, else the one on air)."""
+        if not self.playlist:
+            return
+        ref = self.cued or self.current_preset
+        i = self.playlist.index(ref) if ref in self.playlist else -1
+        self.cue(self.playlist[(i + direction) % len(self.playlist)])
+
+    def take(self):
+        """Bring the cued look on: with its own transition, on the launch beat / bar / phrase. Mid-crossfade,
+        it finishes the fade from where the fader is."""
+        og = self.pipe.outgoing
+        if self.xf_live and og and og.get("manual"):
+            secs = max(self.pipe.trans_secs, 0.2)
+            og.update(manual=False, dur=secs, start=glfw.get_time() - og["p"] * secs)
+            self.fade_done()
+            return
+        if not self.cued:
+            self.flash("Cue a look first: Shift-click its tile (or right-click > Cue).", 3)
+            return
+        name, self.cued = self.cued, None
+        self.load_preset(name)
+
+    def set_xfader(self, v):
+        self.xfader = min(1.0, max(0.0, v))
+
+    def fade_done(self):
+        """A crossfade by hand is complete: the cued look is on air. Whichever end the fader is nearer is now
+        its start, so the next look comes in by moving away from it (after a full fade: the way it came back)."""
+        self.xf_live, self.cued = None, None
+        self.xf_dir = 1 if self.xfader < 0.5 else -1
+        self.xf_armed = min(self.xfader, 1.0 - self.xfader) <= 0.02
+        self.auto_progress = 0.0
+
+    def cancel_fade(self):
+        """Put the look the fader came from back on air, and set the half-faded one aside."""
+        p, og = self.pipe, self.pipe.outgoing
+        if og and og.get("manual"):
+            for f in walk(p.order):
+                f.on, f.mix, f.removing = False, 0.0, False
+            p.order, p.outgoing = og["order"], None
+            p.lib_i ^= 1
+            for f in walk(p.order):
+                f.xf_keep = False
+        if self.xf_live:
+            self.current_preset, self.band, self.gain = self.xf_live
+        self.xf_live = None
+        self.xf_armed = False   # the fader has to come back to its start before it fades again
+
+    def crossfader_step(self):
+        """Once a frame: follow the fader. Moving it off its start fades the cued look in; at the far end it's on."""
+        prog = self.xfader if self.xf_dir > 0 else 1.0 - self.xfader
+        if not self.xf_live:
+            if prog <= 0.02:
+                self.xf_armed = True
+            if not (self.xf_armed and prog > 0.02 and self.cued and self.pipe.outgoing is None
+                    and not self.pending_look):
+                return
+            name, self.xf_armed = self.cued, False
+            self._load_preset(name, manual=True)   # and on to place it where the fader is, this frame
+        og = self.pipe.outgoing
+        if not og or not og.get("manual"):   # finished another way (Take)
+            self.xf_live = None
+            return
+        og["p"] = min(prog, 0.999)
+        if prog >= 0.98:
+            og["p"] = 1.0   # the pipeline sets the old look aside on its next frame
+            self.fade_done()
+
     def playlist_step(self, direction=1):
         if not self.playlist:
             self.flash("Save some looks to the playlist first (+ Save look).")
@@ -1917,7 +2116,9 @@ class App:
                 return
         self._load_preset(name)
 
-    def _load_preset(self, name):
+    def _load_preset(self, name, manual=False):
+        if self.xf_live and not manual:   # a hand crossfade part-way: back to where it came from first
+            self.cancel_fade()
         try:
             with open(os.path.join(PRESET_DIR, name + ".json")) as fh:
                 data = clean_look(json.load(fh))
@@ -1928,7 +2129,12 @@ class App:
         m = self.meta(name)
         style, secs = ((m["transition"], self.tempo.seconds(m["fade"], m["fade_unit"])) if m["transition"] >= 0
                        else (self.pipe.transition, self.pipe.trans_secs))
-        if style == LOOK_MORPH and secs >= 0.05:
+        if manual:   # the crossfader: a picture crossfade in the look's style (Morph and Cut fade as Dissolve)
+            self.xf_live = (self.current_preset, self.band, self.gain)
+            self.pipe.override = None
+            self.crossfade_look(data, style if style in (1, 3, 4) else 0, 1.0)
+            self.pipe.outgoing.update(manual=True, p=0.0)
+        elif style == LOOK_MORPH and secs >= 0.05:
             self.morph_look(data, secs)
         elif style == 2 or secs < 0.05 or not any(not f.removing for f in self.pipe.order):
             self.pipe.override = (2, 0.0, glfw.get_time() + 0.1)   # Cut (or nothing on screen yet): instant
@@ -2077,6 +2283,8 @@ class App:
                 if not f.on or f.removing:
                     continue
             for key, a in f.autos.items():
+                if a.get("paused"):   # held where it is (a MIDI toggle or the menu), settings kept
+                    continue
                 rate = max(a["rate"], 0.01)
                 raw = t / rate if a["unit"] == 0 else tp.phase / (rate * (1 if a["unit"] == 1 else tp.beats_per_bar))
                 cyc = raw + a.get("phase", 0.0)
@@ -2204,7 +2412,7 @@ class App:
                     current=self.current_preset,
                     audio_input=self.audio.device_name if self.audio.stream else None,
                     transition=p.transition, trans_time=p.trans_time, trans_unit=p.trans_unit, wave_rate=p.wave_rate,
-                    tempo=dict(bpm=round(self.tempo.bpm, 2), source=self.tempo.source,
+                    tempo=dict(bpm=round(self.tempo.bpm, 2), source=self.tempo.source, mult=self.tempo.mult,
                                bar=self.tempo.beats_per_bar, quantize=self.quantize),
                     auto=dict(every=self.auto_every, unit=self.auto_unit),
                     record=dict(folder=self.rec_folder, format=self.rec_format, fps=self.rec_fps,
@@ -2252,6 +2460,7 @@ class App:
         self.tempo.bpm = tm.get("bpm", self.tempo.bpm)
         self.tempo.source = tm.get("source", self.tempo.source)
         self.tempo.beats_per_bar = tm.get("bar", self.tempo.beats_per_bar)
+        self.tempo.mult = tm.get("mult") if tm.get("mult") in (0.5, 1.0, 2.0) else 1.0
         self.quantize = tm.get("quantize", self.quantize)
         rc = data.get("record", {})
         self.rec_folder = rc.get("folder", self.rec_folder)
@@ -2462,7 +2671,8 @@ class App:
         tp = self.tempo
         if tp.source == tempo.MIDI_CLOCK and t - tp.clock_seen > 1.0:
             tp.clock_running = False   # the DAW stopped sending: run on freely
-        tp.advance(dt, t, onset=beat)
+        au.beat_mult = tp.mult
+        tp.advance(dt, t, onset=beat, est=au.beat_est if au.stream else None, now=time.perf_counter())
         beat = tp.beat_now
         if beat:
             self.beat_until = t + 0.12
@@ -2495,6 +2705,8 @@ class App:
 
         for msg in self.midi.poll():
             self.handle_midi(msg, t)
+        self.crossfader_step()
+        self.midi_feedback()
         self.track_undo(t)
         cur = self.current_preset
         if (cur and cur not in self.thumb_tried and not self.pipe.outgoing and t - self.preset_t > 1.5
@@ -2821,6 +3033,8 @@ def main():
                 src.close()
         app.audio.close()
         app.midi.close()   # free the ports, so a relaunch (or another program) can open them
+        app.lights_off()
+        app.midi_out.close()
         app.audio.tap = None
         app.recorder.close()   # finish the file properly and let the recording helper go
         if app.spout:

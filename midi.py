@@ -1,8 +1,9 @@
-"""MIDI input through Windows' own MIDI system (winmm), so no extra package is needed.
+"""MIDI through Windows' own MIDI system (winmm), so no extra package is needed.
 
 Every input port is opened; incoming messages are queued from Windows' callback thread and read once per frame
 with MidiIn.poll() as (kind, channel, number, value): kind "cc" (value 0-127) or "note" (velocity, 0 = released),
 or the MIDI clock ("clock" with value = Windows' timestamp in ms, "start", "stop").
+MidiOut sends back to the output ports the user picked (button lights on a controller, see App.midi_feedback).
 """
 import collections
 import ctypes
@@ -87,3 +88,63 @@ class MidiIn:
             elif kind == 0x80:
                 out.append(("note", ch, d1, 0))
         return out
+
+
+class _MIDIOUTCAPSW(ctypes.Structure):
+    _fields_ = [("wMid", wintypes.WORD), ("wPid", wintypes.WORD), ("vDriverVersion", wintypes.UINT),
+                ("szPname", wintypes.WCHAR * 32), ("wTechnology", wintypes.WORD), ("wVoices", wintypes.WORD),
+                ("wNotes", wintypes.WORD), ("wChannelMask", wintypes.WORD), ("dwSupport", wintypes.DWORD)]
+
+
+def list_out_ports():
+    """Names of the MIDI output ports, in Windows' order."""
+    if not _winmm:
+        return []
+    names = []
+    for i in range(_winmm.midiOutGetNumDevs()):
+        caps = _MIDIOUTCAPSW()
+        ok = _winmm.midiOutGetDevCapsW(ctypes.c_size_t(i), ctypes.byref(caps), ctypes.sizeof(caps)) == 0
+        names.append(caps.szPname if ok else f"MIDI output {i + 1}")
+    return names
+
+
+def short_msg(kind, ch, num, val):
+    """A note-on or CC as one packed message (a note with value 0 is its light off)."""
+    return (0x90 if kind == "note" else 0xB0) | ((ch - 1) & 0x0F) | ((num & 0x7F) << 8) | ((val & 0x7F) << 16)
+
+
+class MidiOut:
+    """The output ports the user picked, opened by name (only those: a synth on another port never hears us)."""
+    def __init__(self):
+        self.ports = []   # (name, handle or None, error)
+
+    def open(self, names):
+        self.close()
+        if not _winmm:
+            return
+        for i, name in enumerate(list_out_ports()):
+            if name not in names:
+                continue
+            h = wintypes.HANDLE()
+            err = _winmm.midiOutOpen(ctypes.byref(h), wintypes.UINT(i), ctypes.c_size_t(0), ctypes.c_size_t(0), 0)
+            if err == 0:
+                self.ports.append((name, h, None))
+            else:
+                self.ports.append((name, None, "busy (in use by another program?)" if err == 4 else f"error {err}"))
+
+    @property
+    def active(self):
+        return any(h for _n, h, _e in self.ports)
+
+    def send(self, kind, ch, num, val):
+        msg = short_msg(kind, ch, num, val)
+        for _name, h, _err in self.ports:
+            if h:
+                _winmm.midiOutShortMsg(h, wintypes.DWORD(msg))
+
+    def close(self):
+        for _name, h, _err in self.ports:
+            if h:
+                _winmm.midiOutReset(h)
+                _winmm.midiOutClose(h)
+        self.ports = []

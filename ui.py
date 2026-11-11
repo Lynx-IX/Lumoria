@@ -22,7 +22,7 @@ import tempo
 import audio as A
 from audio import list_inputs
 from segment import QUALITY as SEG_QUALITY
-from shared import (AUTO_OFF, AUTO_PLAYLIST, AUTO_RANDOM, DATA, HERE, LOOK_TRANSITIONS, MOD_AUDIO, MOD_WAVE,
+from shared import (AUTO_OFF, AUTO_PLAYLIST, AUTO_RANDOM, DATA, HERE, LOOK_TRANSITIONS, MOD_AUDIO, MOD_OFF, MOD_WAVE,
                     RESOLUTIONS, SOURCE_URL, SUPPORT_URL, TRANSITIONS, VERSION, save_json)
 from sources import CameraSource, describe, list_cameras, list_screens, window_label
 

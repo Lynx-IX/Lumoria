@@ -211,6 +211,7 @@ class _State:
     panels_shut = []               # Custom: the panels folded down to their title strip
     settings_open = False          # the Settings drop-down (under its top-bar button)
     settings_focus = False
+    settings_page = None           # the Settings section open in the panel beside its menu (None: all folded)
     settings_btn = None            # the Settings button's rect (min, max), for the drop-down to hang from
     file_anchor = None             # where the File menu opens (under its button)
     load = None                    # CPU / GPU load for the top bar readout (sysload.SysLoad, started on first use)
@@ -1155,47 +1156,93 @@ def custom_layout(app, W, H, tb):
 
 
 def settings_window(app, W, H, tb):
-    """Settings drops down under its top-bar button (or opens from File). It folds away again with the button, Esc,
-    or a click anywhere outside it (not while a menu inside it is open, or during MIDI learn)."""
+    """Settings drops down under its top-bar button (or opens from File) as a short menu of sections, all folded.
+    Clicking one opens it in a panel to the right of the menu; opening another closes it (clicking the open one
+    again folds it). The whole thing folds away with the button, Esc, or a click anywhere outside it (not while a
+    menu inside it is open, or during MIDI learn)."""
     if not S.settings_open:
+        S.settings_page = None   # folded again next time
         return
     vp = imgui.get_main_viewport()
-    w = min(sc(480), W - 16)
+    pages = settings_list(app)
+    mw = min(sc(210), W - 16)
     if S.settings_btn:
         bmin, bmax = S.settings_btn
-        x, y = max(vp.pos.x + 8, min(bmin.x, vp.pos.x + W - w - 8)), bmax.y + 6
+        x, y = max(vp.pos.x + 8, min(bmin.x, vp.pos.x + W - mw - 8)), bmax.y + 6
     else:
         x, y = vp.pos.x + 8, vp.pos.y + tb
-    h = min(sc(760), vp.pos.y + H - y - 8)
-    imgui.set_next_window_pos(V(x, y))
-    imgui.set_next_window_size(V(w, max(sc(160), h)))
+    page = next((p for p in pages if p[0] == S.settings_page), None)
+    pw = min(sc(480), max(sc(300), W - mw - 20))   # the open section's panel, beside the menu
+    if page is not None:   # make room for it: the menu moves left as far as it has to
+        x = max(vp.pos.x + 8, min(x, vp.pos.x + W - mw - 4 - pw - 8))
+    row_h = imgui.get_frame_height() + sc(6)
+    mh = min(len(pages) * (row_h + 2) + 20, vp.pos.y + H - y - 8)
     if S.settings_focus:
         imgui.set_next_window_focus()
         S.settings_focus = False
-    imgui.push_style_color(imgui.Col_.window_bg, PANEL)
-    imgui.push_style_color(imgui.Col_.border, BORDER)
-    imgui.push_style_var(imgui.StyleVar_.window_border_size, 1)
-    imgui.push_style_var(imgui.StyleVar_.window_rounding, 4)
-    imgui.push_style_var(imgui.StyleVar_.window_padding, V(12, 10))
-    imgui.begin("##settings_drop", None, imgui.WindowFlags_.no_title_bar | imgui.WindowFlags_.no_move
-                | imgui.WindowFlags_.no_resize | imgui.WindowFlags_.no_collapse | imgui.WindowFlags_.no_saved_settings)
-    imgui.pop_style_var(3)
-    imgui.pop_style_color(2)
+    flags = (imgui.WindowFlags_.no_title_bar | imgui.WindowFlags_.no_move | imgui.WindowFlags_.no_resize
+             | imgui.WindowFlags_.no_collapse | imgui.WindowFlags_.no_saved_settings)
+
+    def begin_drop(name, pos, size):
+        imgui.set_next_window_pos(pos)
+        imgui.set_next_window_size(size)
+        imgui.push_style_color(imgui.Col_.window_bg, PANEL)
+        imgui.push_style_color(imgui.Col_.border, BORDER)
+        imgui.push_style_var(imgui.StyleVar_.window_border_size, 1)
+        imgui.push_style_var(imgui.StyleVar_.window_rounding, 4)
+        imgui.push_style_var(imgui.StyleVar_.window_padding, V(8, 10) if name == "##settings_drop" else V(12, 10))
+        imgui.begin(name, None, flags)
+        imgui.pop_style_var(3)
+        imgui.pop_style_color(2)
+
+    # the menu: one row per section, folded; the open one is lit, with its arrow pointing at its panel
+    begin_drop("##settings_drop", V(x, y), V(mw, mh))
     pos = imgui.get_window_pos()
-    # a little notch pointing up at the button
-    if S.settings_btn:
+    if S.settings_btn:   # a little notch pointing up at the button
         cx = (S.settings_btn[0].x + S.settings_btn[1].x) / 2
-        if pos.x + 12 < cx < pos.x + w - 12:
+        if pos.x + 12 < cx < pos.x + mw - 12:
             fg = imgui.get_foreground_draw_list()
             fg.add_triangle_filled(V(cx - 7, pos.y + 1), V(cx + 7, pos.y + 1), V(cx, pos.y - 6), u32(PANEL))
             fg.add_line(V(cx - 7, pos.y), V(cx, pos.y - 6), u32(BORDER), 1)
             fg.add_line(V(cx, pos.y - 6), V(cx + 7, pos.y), u32(BORDER), 1)
-    settings_cards("settings", settings_list(app))
-    io = imgui.get_io()
+    imgui.push_style_var(imgui.StyleVar_.item_spacing, V(4, 2))
+    for title, icon, _ in pages:
+        on = S.settings_page == title
+        imgui.push_style_color(imgui.Col_.header, alpha(CYAN, .14))
+        imgui.push_style_color(imgui.Col_.header_hovered, alpha(CYAN, .08) if not on else alpha(CYAN, .18))
+        imgui.push_style_color(imgui.Col_.header_active, alpha(CYAN, .22))
+        if imgui.selectable(f"##page{title}", on, 0, V(0, row_h))[0]:
+            S.settings_page = None if on else title   # opening one closes the one before
+        imgui.pop_style_color(3)
+        mn, mx = imgui.get_item_rect_min(), imgui.get_item_rect_max()
+        dl = imgui.get_window_draw_list()
+        ty = (mn.y + mx.y - imgui.get_text_line_height()) / 2
+        dl.add_text(V(mn.x + 8, ty), u32(CYAN if on else DIM), icon)
+        dl.add_text(V(mn.x + sc(34), ty), u32(TEXT if on else KEY_TEXT), title)
+        dl.add_text(V(mx.x - sc(18), ty), u32(CYAN if on else alpha(DIM, .7)), fa.ICON_FA_CHEVRON_RIGHT)
+    imgui.pop_style_var()
     mine = imgui.is_window_hovered(imgui.HoveredFlags_.root_and_child_windows
                                    | imgui.HoveredFlags_.allow_when_blocked_by_popup
                                    | imgui.HoveredFlags_.allow_when_blocked_by_active_item)
     imgui.end()
+
+    # the open section, in a panel to the right of the menu (over it, if the window is too narrow for both)
+    if page is not None:
+        pw = min(pw, W - 16)
+        px = min(x + mw + 4, vp.pos.x + W - pw - 8)
+        ph = min(sc(760), vp.pos.y + H - y - 8)
+        begin_drop("##settings_page", V(px, y), V(pw, max(sc(160), ph)))
+        imgui.push_font(S.bold, 13)
+        imgui.text_colored(DIM, f"{page[1]}   {page[0].upper()}")
+        imgui.pop_font()
+        imgui.separator()
+        imgui.spacing()
+        page[2]()
+        mine = mine or imgui.is_window_hovered(imgui.HoveredFlags_.root_and_child_windows
+                                               | imgui.HoveredFlags_.allow_when_blocked_by_popup
+                                               | imgui.HoveredFlags_.allow_when_blocked_by_active_item)
+        imgui.end()
+    io = imgui.get_io()
     on_btn = S.settings_btn and imgui.is_mouse_hovering_rect(*S.settings_btn)
     if imgui.is_popup_open("", imgui.PopupFlags_.any_popup) or app.midi_learn:
         return

@@ -82,6 +82,10 @@ They live in `samples/`; the welcome (Settings > About > Show the welcome again)
   cutting things off: the readout moves to the right-hand corner with the keys under it; narrower still, the keys
   become small icon keys (hover one for its name) stacked in rows in the corner, and the source's name in the readout
   is shortened.
+- **Settings** (top bar) drops down a short menu of its sections (AI Mask, Tempo, Transitions, Output, MIDI,
+  Interface, About), all folded. Click one and it opens in a panel to the right of the menu; clicking another
+  switches to it (one is open at a time), and clicking the open one again folds it. Esc or a click outside closes
+  Settings.
 - **Sidebar:** Input, Audio, Effects, Transitions, Output.
 - **Effects:** *+ Add effect* opens the library (searchable, grouped). Each effect in the chain is a card:
   drag it by its grip or its name to reorder, power to bypass, the **music note** turns listening on (lit) or off (dim; off, the

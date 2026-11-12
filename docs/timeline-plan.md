@@ -17,6 +17,9 @@ a test copy before anything lands on main.
   segment / delete), mute and remove, the playhead when the look is on air. Every change is saved into the look
   file (`App.edit_timeline`) and played at once if the look is on air. Not yet: undo, box-select, copy / paste,
   zoom (step 6).
+- Step 4 (merge) done: the look editor window has two tabs, *Transition & stay* (the old Transition popup,
+  `look_meta_body`) and *Timeline*; a timeline look's Stay is its loop-pass count (`loops`); auto-play's "every" is a
+  small button with its value on the playlist bar (a popup), so the bar is shorter.
 
 ## The idea in one paragraph
 

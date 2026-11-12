@@ -108,11 +108,12 @@ They live in `samples/`; the welcome (Settings > About > Show the welcome again)
 - **Playlist (bottom):** saved looks as tiles. A look is a snapshot of the whole effect chain: build one in the
   sidebar, then press **Save look** (or the **+ Save current look** tile). Click a tile to fire it (with the current
   transition), drag to reorder; the ▾ key in a tile's lower-right corner (or right-clicking the tile) opens its menu:
-  cue, transition, overwrite, export, update thumbnail, delete. Play runs through the playlist (or random looks)
-  every N seconds or beats. Switching looks (by clicking or auto-play) is a real crossfade: the old look keeps
-  running while the new one comes in. The sidebar's *Transitions* sets the default; right-click a tile >
-  *Transition* to give a look its own (Dissolve / Grow / Cut / Wipe / Flash) and its own transition time, plus an
-  optional auto-play stay time.
+  cue, transition & stay, timeline, overwrite, export, update thumbnail, delete. Play runs through the playlist (or
+  random looks) every N seconds, beats or bars (the *every* button beside Playlist / Random). Switching looks (by clicking or auto-play) is a real crossfade: the old look keeps
+  running while the new one comes in. The sidebar's *Transitions* sets the default; a tile's menu >
+  *Transition & stay* opens the look's editor on that tab, to give it its own transition (Dissolve / Grow / Cut /
+  Wipe / Flash / Morph) and time, plus how long auto-play stays on it (whole loop passes, for a look with a
+  timeline). Its other tab is the look's *Timeline*.
   **Import / Export** (playlist bar) share or back up looks as files: *Export* saves the whole playlist to one
   `.lumoria-playlist`, right-click a tile > *Export this look* saves one `.lumoria-look`. *Import* adds the looks
   in such files to the end of your playlist (with their transitions and timing); a name you already use gets
@@ -239,7 +240,8 @@ Cue next / previous; with Button lights on, Take lights up while something is cu
 
 ## Look timelines
 A look can have a **timeline** that moves its sliders over time, in bars on the tempo clock (or seconds). Open it
-from a look tile's ▾ menu (or right-click) > **Timeline...**; *Make a timeline* gives it one, 8 bars long.
+from a look tile's ▾ menu (or right-click) > **Timeline...** (the look's editor, beside its *Transition & stay*
+tab); *Make a timeline* gives it one, 8 bars long.
 - **Lanes:** *+ Lane* picks an effect in the look and one of its sliders (the same ones its card can automate).
   Click a lane to add a point, drag a point to move it (it snaps to the *Grid*; hold Shift to place it freely),
   right-click a point to choose how it gets to the next one - *Ramp* (a straight line), *Ease* (smooth in and out)
@@ -251,8 +253,8 @@ from a look tile's ▾ menu (or right-click) > **Timeline...**; *Make a timeline
   pass* plays the loop to its end first; *Jump to outro* starts it at once (timed to end on the launch beat, bar or
   phrase when *launch* is set). The next look comes in so its transition overlaps the end of the outro, while the old
   look plays its outro out as it fades. The crossfader, random auto-play and firing the same look skip the outro.
-- **Auto-play** stays on a timeline look for whole loop passes: *Auto-play* in the editor sets how many (0: as many
-  as fit the playlist's *every*).
+- **Auto-play** stays on a timeline look for whole loop passes: *Stay* on the *Transition & stay* tab sets how many
+  (0: as many as fit the playlist's *every*).
 - The timeline is saved in the look, so exporting and importing a look keeps it. Changes save as you make them, and
   if the look is on air you see them straight away, with the playhead moving across the lanes.
 

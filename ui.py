@@ -204,7 +204,6 @@ class _State:
     pending_move = None            # (item uid, destination list, index or None) from a card drag/menu
     open_save = False              # open the "save look" popup next frame
     open_lib, lib_target = False, None   # open the effect library; add into this group (None = top)
-    meta_open = None               # look name whose transition & timing popup should open
     show_mask = False              # small view of the refined AI mask over the preview
     layout = 0                     # 0 Classic (fixed sidebar / preview / playlist), 1 Custom (panels you place)
     panels = {}                    # Custom: panel key -> [x, y, w, h] as fractions of the area under the top bar
@@ -324,6 +323,10 @@ def apply_theme(name, accent=0):
         (imgui.Col_.nav_cursor, CYAN),
         (imgui.Col_.resize_grip, CLEAR), (imgui.Col_.resize_grip_hovered, alpha(CYAN, .5)),   # the Settings window
         (imgui.Col_.resize_grip_active, CYAN),
+        (imgui.Col_.tab, KEY_BOT), (imgui.Col_.tab_hovered, KEY_HOV),   # the look editor's tabs
+        (imgui.Col_.tab_selected, STRIP_ON_TOP), (imgui.Col_.tab_selected_overline, CYAN),
+        (imgui.Col_.tab_dimmed, KEY_BOT), (imgui.Col_.tab_dimmed_selected, STRIP_TOP),
+        (imgui.Col_.tab_dimmed_selected_overline, alpha(CYAN, .5)),
     ):
         s.set_color_(col, c)
     tint_title_bars()
@@ -4071,15 +4074,22 @@ def auto_controls(app, nxt):
     if app.auto_mode:
         app.auto_mode = S.auto_kind
 
-    sp = imgui.get_style().item_spacing.x
-    nxt(imgui.calc_text_size("every").x + sp + sc(90) + sp + sc(150), 18)   # kept together on one line
-    imgui.align_text_to_frame_padding()
-    imgui.text_colored(DIM, "every")
-    imgui.same_line()
-    imgui.set_next_item_width(sc(90))
-    _, app.auto_every = slider_int("##every", app.auto_every, 1, 32)
-    imgui.same_line()
-    app.auto_unit = segmented("unit", tempo.UNITS, app.auto_unit, VIOLET, sc(150))
+    text = f"{fa.ICON_FA_CLOCK}  every {amount_text(app.auto_every, app.auto_unit)}"
+    pad = imgui.get_style().frame_padding.x
+    nxt(imgui.calc_text_size(text).x + pad * 2, 10)
+    if neon_button(f"{text}##everybtn", VIOLET, V(0, 0), flat=True,
+                   tip="How long auto-play stays on each look (click to change).\n"
+                       "A look with a timeline stays for whole loop passes instead (its Transition & stay tab)."):
+        imgui.open_popup("every")
+    if imgui.begin_popup("every"):
+        imgui.text_colored(DIM, "Auto-play moves on every")
+        imgui.set_next_item_width(sc(150))
+        _, app.auto_every = slider_int("##every", app.auto_every, 1, 32)
+        imgui.same_line()
+        app.auto_unit = segmented("unit", tempo.UNITS, app.auto_unit, VIOLET, sc(150))
+        imgui.text_colored(DIM, "A look can stay longer or shorter: its tile menu > Transition & stay.\n"
+                                "Looks with a timeline stay for whole loop passes.")
+        imgui.end_popup()
 
 
 def look_file_buttons(app, nxt):
@@ -4267,15 +4277,14 @@ def save_popup(app):
     imgui.end_popup()
 
 
-def look_meta_popup(app, name):
-    """Per-look transition (how it fades in) and timing (how long auto-play stays on it)."""
-    if not imgui.begin_popup("lookmeta"):
-        return
+def look_meta_body(app, ed):
+    """The look editor's first tab: how the screen changes over to this look, and how long auto-play stays on it
+    (whole loop passes, for a look with a timeline)."""
+    name, tl = ed["name"], ed["tl"]
     m = app.meta(name)
-    w = sc(380)
-    bold(f"{name}: transition", 15)
-    imgui.separator()
-    imgui.text_colored(DIM, "How the screen changes over to this look (clicking its tile or auto-play)")
+    w = sc(420)
+    imgui.spacing()
+    imgui.text_colored(DIM, "How the screen changes over to this look (clicking its tile, Take or auto-play)")
     label("Transition")
     tr = segmented("tr", ["Default"] + LOOK_TRANSITIONS, m["transition"] + 1, VIOLET, w) - 1
     fade, fade_unit = m["fade"], m["fade_unit"]
@@ -4286,29 +4295,44 @@ def look_meta_popup(app, name):
     elif tr != 2:
         label("Time")
         fade, fade_unit = time_with_unit(app, "fade", fade, fade_unit, w)
+    if tl and "loop_end" in tl:
+        imgui.text_colored(DIM, "When it leaves through its outro, the next look's transition overlaps the outro's end.")
     imgui.spacing()
     imgui.separator()
-    imgui.text_colored(DIM, "Auto-play only: how long to stay on this look before moving on")
-    label("Stay")
-    custom = segmented("hold", ("Default", "Custom"), 1 if m["hold"] > 0 else 0, VIOLET, w) == 1
     hold, unit = m["hold"], m["unit"]
-    if custom:
-        hold = max(1, hold or app.auto_every)
-        label("For")
-        imgui.set_next_item_width(w - sc(150))
-        _, hold = slider_int("##holdn", hold, 1, 128)
+    if tl:   # a timeline look stays for whole loop passes
+        imgui.text_colored(DIM, "Auto-play: how many times its loop plays before moving on")
+        label("Stay")
+        imgui.set_next_item_width(sc(150))
+        lp = tl.get("loops", 0)
+        changed, lp2 = slider_int("##tlloops", lp, 0, 32, "%d")
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("Loop passes auto-play stays on this look. 0 = as many as fit the playlist's 'every'\n"
+                              "(then, with an outro, the outro plays as it leaves)")
+        if changed:
+            tl["loops"] = lp2
+        if imgui.is_item_deactivated_after_edit():
+            tl_changed(app)
         imgui.same_line()
-        unit = segmented("unit", tempo.UNITS, unit, VIOLET, sc(142))
+        imgui.text_colored(DIM, f"loops (0: as many as fit 'every {amount_text(app.auto_every, app.auto_unit)}')"
+                           if lp == 0 else ("loop" if lp == 1 else "loops"))
     else:
-        hold = 0
-        imgui.text_colored(DIM, f"Uses the playlist's 'every {amount_text(app.auto_every, app.auto_unit)}'.")
+        imgui.text_colored(DIM, "Auto-play only: how long to stay on this look before moving on")
+        label("Stay")
+        custom = segmented("hold", ("Default", "Custom"), 1 if m["hold"] > 0 else 0, VIOLET, w) == 1
+        if custom:
+            hold = max(1, hold or app.auto_every)
+            label("For")
+            imgui.set_next_item_width(w - sc(150))
+            _, hold = slider_int("##holdn", hold, 1, 128)
+            imgui.same_line()
+            unit = segmented("unit", tempo.UNITS, unit, VIOLET, sc(142))
+        else:
+            hold = 0
+            imgui.text_colored(DIM, f"Uses the playlist's 'every {amount_text(app.auto_every, app.auto_unit)}'.")
     new = dict(transition=tr, fade=round(fade, 2), fade_unit=fade_unit, hold=hold, unit=unit)
     if any(new[k] != m[k] for k in new):
         app.set_meta(name, **new)
-    imgui.spacing()
-    if neon_button("Done", VIOLET, V(-1, 0)):
-        imgui.close_current_popup()
-    imgui.end_popup()
 
 
 def thumb_texture(app, name):
@@ -4407,10 +4431,11 @@ def new_timeline():
     return dict(unit="bars", length=8.0, grid=0.25, on_leave="finish", loops=0, lanes=[])
 
 
-def open_timeline(app, name):
-    """Open the timeline editor on look `name` (a copy of its timeline; every change is saved back)."""
+def open_timeline(app, name, tab="timeline"):
+    """Open the look editor on look `name`, on its Timeline or its Transition & stay tab (a copy of the timeline;
+    every change is saved back)."""
     tl, ids = app.look_timeline(name)
-    S.tl = dict(name=name, tl=json.loads(json.dumps(tl)) if tl else None, ids=ids, drag=None, menu=None)
+    S.tl = dict(name=name, tl=json.loads(json.dumps(tl)) if tl else None, ids=ids, drag=None, menu=None, tab=tab)
     S.tl_focus = True
 
 
@@ -4463,20 +4488,29 @@ def timeline_window(app, W, H, tb):
     imgui.push_style_color(imgui.Col_.window_bg, PANEL)
     imgui.push_style_color(imgui.Col_.border, BORDER)
     imgui.push_style_var(imgui.StyleVar_.window_border_size, 1)
-    opened, keep = imgui.begin(f"{fa.ICON_FA_TIMELINE}   Timeline: {ed['name']}###timeline", True, imgui.WindowFlags_.no_saved_settings
-                               | imgui.WindowFlags_.no_collapse)
+    opened, keep = imgui.begin(f"{fa.ICON_FA_LAYER_GROUP}   Look: {ed['name']}###timeline", True,
+                               imgui.WindowFlags_.no_saved_settings | imgui.WindowFlags_.no_collapse)
     imgui.pop_style_var()
     imgui.pop_style_color(2)
     if not keep:
         S.tl = None
         imgui.end()
         return
-    if opened:
-        if ed["tl"] is None:
-            timeline_empty(app, ed)
-        else:
-            timeline_header(app, ed)
-            timeline_body(app, ed)
+    if opened and imgui.begin_tab_bar("lookedit"):
+        want, ed["tab"] = ed.get("tab"), None   # a tab asked for when it opened: selected once
+        for key, title in (("transition", f"{fa.ICON_FA_WAND_MAGIC_SPARKLES}   Transition & stay"),
+                           ("timeline", f"{fa.ICON_FA_TIMELINE}   Timeline")):
+            flags = imgui.TabItemFlags_.set_selected if want == key else 0
+            if imgui.begin_tab_item(f"{title}###{key}", None, flags)[0]:
+                if key == "transition":
+                    look_meta_body(app, ed)
+                elif ed["tl"] is None:
+                    timeline_empty(app, ed)
+                else:
+                    timeline_header(app, ed)
+                    timeline_body(app, ed)
+                imgui.end_tab_item()
+        imgui.end_tab_bar()
     imgui.end()
 
 
@@ -4544,22 +4578,7 @@ def timeline_header(app, ed):
         if lv != int(tl.get("on_leave") == "jump"):
             tl["on_leave"] = "jump" if lv else "finish"
             tl_changed(app)
-    # second row: auto-play, lanes, where it is
-    imgui.align_text_to_frame_padding()
-    imgui.text_colored(DIM, "Auto-play")
-    imgui.same_line()
-    imgui.set_next_item_width(sc(130))
-    lp = tl.get("loops", 0)
-    changed, lp2 = slider_int("##tlloops", lp, 0, 32, "%d")
-    if imgui.is_item_hovered():
-        imgui.set_tooltip("How many loop passes auto-play stays on this look\n0 = as many as fit the playlist's 'every'")
-    if changed:
-        tl["loops"] = lp2
-    if imgui.is_item_deactivated_after_edit():
-        tl_changed(app)
-    imgui.same_line()
-    imgui.text_colored(DIM, "loops (0: fit 'every')" if lp == 0 else ("loop" if lp == 1 else "loops"))
-    imgui.same_line(0, 18)
+    # second row: lanes, where it is
     if neon_button(f"{fa.ICON_FA_PLUS}  Lane##tladd", CYAN, V(0, 0), tip="Add a lane: pick an effect in this look, "
                                                                           "then the slider it moves"):
         imgui.open_popup("tl_add")
@@ -4913,8 +4932,8 @@ def tiles(app, panel_h, with_deck=True):
             if imgui.selectable(f"{fa.ICON_FA_FORWARD}   " + ("Uncue" if app.cued == name else "Cue (line it up to go next)"),
                                 False)[0]:
                 app.cue(None if app.cued == name else name)
-            if imgui.selectable(f"{fa.ICON_FA_WAND_MAGIC_SPARKLES}   Transition...", False)[0]:
-                S.meta_open = name
+            if imgui.selectable(f"{fa.ICON_FA_WAND_MAGIC_SPARKLES}   Transition & stay...", False)[0]:
+                open_timeline(app, name, "transition")
             if imgui.selectable(f"{fa.ICON_FA_TIMELINE}   Timeline...", False)[0]:
                 open_timeline(app, name)
             if imgui.selectable(f"{fa.ICON_FA_FLOPPY_DISK}   Overwrite with current look", False)[0]:
@@ -4927,10 +4946,6 @@ def tiles(app, panel_h, with_deck=True):
                 S.confirm_delete = name
             imgui.end_popup()
         tile_menu_key(mn, mx, hovered)
-        if S.meta_open == name:   # opened here so it shares the tile's ID scope
-            S.meta_open = None
-            imgui.open_popup("lookmeta")
-        look_meta_popup(app, name)
         imgui.pop_id()
 
     # the last tile saves what's on screen right now as a new look

@@ -21,7 +21,7 @@ class FakePipe:
 class FakeApp:
     """The App's cue / crossfader methods over a stand-in pipeline: loading a look just records it."""
     for _name in ("cue", "cue_step", "take", "set_xfader", "fade_done", "cancel_fade", "crossfader_step",
-                  "load_preset"):
+                  "load_preset", "plan_leave"):
         locals()[_name] = L.App.__dict__[_name]
 
     def __init__(self):
@@ -30,6 +30,7 @@ class FakeApp:
         self.band, self.gain, self.quantize, self.pending_look = "bass", 1.0, 0, None
         self.cued, self.xfader, self.xf_dir, self.xf_armed, self.xf_live = None, 0.0, 1, True, None
         self.auto_progress, self.fired, self.flashed = 0.0, [], []
+        self.playhead = self.leaving = None   # no look timeline here (see test_timeline)
 
     def flash(self, msg, secs=5):
         self.flashed.append(msg)

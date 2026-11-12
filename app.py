@@ -1239,6 +1239,8 @@ class App:
         self.timeline = None         # the look on air's timeline (timeline.py), or None
         self.playhead = None         # where that look is in it: started when the look comes on
         self.lane_keys = set()       # (effect id, key) its lanes move: their waves wait meanwhile
+        self.leaving = None          # {name, next_at}: the look on air is playing its outro, then `name` comes in
+        self.out_playhead = None     # (playhead, effects) of a look fading out while it plays its outro
         # cue and crossfader: a look lined up without firing, then Taken (on the launch beat / bar / phrase) or
         # faded in by hand. The fader's direction flips each time it brings a look fully in, like A / B decks.
         self.cued = None
@@ -1967,6 +1969,31 @@ class App:
         else:
             self.playlist_step(direction)
 
+    def auto_timeline_step(self, t):
+        """Auto-play on a look with a timeline: it stays for whole loop passes (the timeline's own count, else as many
+        as fit "every"), then moves on - with an outro, the request goes in during the last pass so the pass
+        finishes and the outro plays; without one, the next look comes in as the pass ends."""
+        if self.leaving or len(self.playlist) < 2:   # one look only: its timeline just keeps looping
+            return
+        ph, tp = self.playhead, self.tempo
+        ph.beats_per_bar = tp.beats_per_bar
+        every, unit = self.hold_time()
+        secs = ph.tl.get("unit") == "seconds"
+        every_units = (tp.seconds(every, unit) if secs else
+                       every / (1 if unit == 2 else tp.beats_per_bar) if unit else every * tp.bpm / 60.0 / tp.beats_per_bar)
+        n_pass = timeline.loop_passes(ph.tl, every_units)
+        pos, section, n = ph.where(tp.phase, t)
+        a, b, _ = timeline.sections(ph.tl)
+        frac = (pos - a) / (b - a) if section == "loop" else 0.0
+        self.auto_progress = min(1.0, (n + frac) / n_pass)
+        if section != "loop":
+            return
+        if ph.has_outro() and n >= n_pass - 1 and frac > 0.01:   # into the last pass (not its first instant,
+            self.auto_step()                                     # which would count as the end of the one before)
+        elif not ph.has_outro() and n >= n_pass:
+            self.auto_progress = 0.0
+            self.auto_step()
+
     def hold_time(self):
         """How long auto-play stays on the current look: (count, unit 0 = seconds / 1 = beats)."""
         if self.auto_mode == AUTO_PLAYLIST and self.current_preset:
@@ -2055,7 +2082,8 @@ class App:
         if not self.playlist:
             self.flash("Save some looks to the playlist first (+ Save look).")
             return
-        i = self.playlist.index(self.current_preset) if self.current_preset in self.playlist else -1
+        ref = self.leaving["name"] if self.leaving else self.current_preset   # on its way out: from where it's going
+        i = self.playlist.index(ref) if ref in self.playlist else -1
         if i < 0 and direction < 0:
             i = 0
         self.load_preset(self.playlist[(i + direction) % len(self.playlist)])
@@ -2132,8 +2160,11 @@ class App:
         if self.current_preset == name:
             self.current_preset = None
 
-    def load_preset(self, name, now=False):
-        """Fire a look. With launch quantize on (and not now), it waits for the next beat or bar."""
+    def load_preset(self, name, now=False, jump=False):
+        """Fire a look. If the look on air has an outro, it plays that first (see plan_leave). Otherwise, with launch
+        quantize on (and not now), it waits for the next beat or bar."""
+        if not now and self.plan_leave(name, glfw.get_time(), jump):
+            return
         if self.quantize and not now:
             self.pending_look = (name, self.tempo.next_boundary(self.quantize))
             if self.tempo.phase >= self.pending_look[1] - 1e-6:   # right on a boundary already
@@ -2142,7 +2173,55 @@ class App:
                 return
         self._load_preset(name)
 
+    def look_style(self, name):
+        """(transition style, seconds) a look comes in with: its own, or the sidebar's."""
+        m = self.meta(name)
+        return ((m["transition"], self.tempo.seconds(m["fade"], m["fade_unit"])) if m["transition"] >= 0
+                else (self.pipe.transition, self.pipe.trans_secs))
+
+    def plan_leave(self, name, t, jump=False):
+        """The look on air is told to give way to `name`. If its timeline has an outro, schedule the handover: the
+        outro starts when the loop pass finishes (or now, for a jump / a look set to jump), timed to end on the
+        launch boundary when launch quantize is on, and `name` starts coming in so that its transition overlaps
+        the outro's end. Returns False when there's no outro to play (the look loads the usual way)."""
+        ph = self.playhead
+        if ph is None or name == self.current_preset or not ph.has_outro():
+            return False
+        if self.leaving:   # already on its way out: just change where it's going
+            self.leaving["name"] = name
+            return True
+        tp = self.tempo
+        ph.beats_per_bar = tp.beats_per_bar
+        grid = 0 if not self.quantize else (1 if self.quantize == 1
+                                             else tp.beats_per_bar * tempo.PHRASE_BARS[self.quantize])
+        style, secs = self.look_style(name)
+        overlap = 0.0 if style in (2, LOOK_MORPH) else (
+            secs if ph.tl.get("unit") == "seconds" else secs * tp.bpm / 60.0 / max(1, tp.beats_per_bar))
+        plan = timeline.plan_outro(ph, tp.phase, t, jump or ph.tl.get("on_leave") == "jump", grid, tp.bar_origin,
+                                   overlap)
+        if plan is None:
+            return False
+        ph.outro_at, next_at = plan
+        self.leaving = dict(name=name, next_at=next_at)
+        self.pending_look = None
+        return True
+
+    def leave_step(self, t):
+        """Once a frame: when a look leaving through its outro reaches the moment, bring the next one in. The old
+        look keeps playing its outro (its playhead goes with it) while it fades out."""
+        if not self.leaving or self.playhead is None:
+            self.leaving = None
+            return
+        ph = self.playhead
+        if ph.elapsed(self.tempo.phase, t) < self.leaving["next_at"] - 1e-9:
+            return
+        name, self.leaving = self.leaving["name"], None
+        self._load_preset(name)
+        og = self.pipe.outgoing
+        self.out_playhead = (ph, og["order"]) if og and not og.get("manual") else None
+
     def _load_preset(self, name, manual=False):
+        self.leaving = None   # whatever loads now replaces a handover that was waiting
         if self.xf_live and not manual:   # a hand crossfade part-way: back to where it came from first
             self.cancel_fade()
         try:
@@ -2152,9 +2231,7 @@ class App:
             self.flash(f"Couldn't load '{name}': {e}")
             return
         # this look's own transition, or the sidebar's; used for clicks and auto-play alike
-        m = self.meta(name)
-        style, secs = ((m["transition"], self.tempo.seconds(m["fade"], m["fade_unit"])) if m["transition"] >= 0
-                       else (self.pipe.transition, self.pipe.trans_secs))
+        style, secs = self.look_style(name)
         if manual:   # the crossfader: a picture crossfade in the look's style (Morph and Cut fade as Dissolve)
             self.xf_live = (self.current_preset, self.band, self.gain)
             self.pipe.override = None
@@ -2175,20 +2252,28 @@ class App:
     def start_timeline(self, tl):
         """The look now on air brings its timeline (or none): it starts from the top, on the tempo clock."""
         self.timeline = tl or None
-        self.playhead = timeline.Playhead(tl, self.tempo.phase, glfw.get_time(), self.tempo.beats_per_bar)             if tl and tl.get("lanes") is not None else None
+        self.playhead = (timeline.Playhead(tl, self.tempo.phase, glfw.get_time(), self.tempo.beats_per_bar)
+                         if tl and tl.get("lanes") is not None else None)
         self.lane_keys = {(ln["effect"], ln["key"]) for ln in tl.get("lanes", [])
                           if ln.get("mode", "value") == "value" and not ln.get("mute")} if tl else set()
 
     def timeline_step(self, t):
-        """Once a frame, after the waves: the look's lanes set their sliders."""
-        ph = self.playhead
-        if ph is None:
-            return
+        """Once a frame, after the waves: the look's lanes set their sliders; a look fading out after its outro
+        started keeps playing it on its own effects."""
+        out = getattr(self, "out_playhead", None)
+        if out and self.pipe.outgoing is not None and out[1] is self.pipe.outgoing["order"]:
+            self.apply_lanes(out[0], out[1], t)
+        else:
+            self.out_playhead = None
+        if self.playhead is not None:
+            self.apply_lanes(self.playhead, self.pipe.order, t)
+
+    def apply_lanes(self, ph, order, t):
         ph.beats_per_bar = self.tempo.beats_per_bar
         vals = ph.values(self.tempo.phase, t)
         if not vals:
             return
-        for f in walk(self.pipe.order):
+        for f in walk(order):
             if isinstance(f, Group) or f.removing:
                 continue
             for (eid, key), v in vals.items():
@@ -2743,6 +2828,7 @@ class App:
         if self.pending_look and tp.phase >= self.pending_look[1] - 1e-6:   # a quantized launch's moment
             name, self.pending_look = self.pending_look[0], None
             self.load_preset(name, now=True)
+        self.leave_step(t)
         lv = self.audio.level
         b["bands"] = (lv["bass"] * self.gain, lv["mid"] * self.gain, lv["high"] * self.gain)
         b["hits"] = (lv["kick"], lv["snare"], lv["hat"], lv["accent"])
@@ -2755,7 +2841,9 @@ class App:
         # flow clock, beat clock (steps one beat at a time, eased, so a motion lands on every beat), bar position
         b["music"] = (self.audio.flow, math.floor(ph) + fr * fr * (3 - 2 * fr), (ph / tp.beats_per_bar) % 1.0, 0.0)
         self.pipe.audio_tex.write(self.audio.shader_data(t).tobytes())
-        if self.auto_mode:
+        if self.auto_mode == AUTO_PLAYLIST and self.playhead is not None:
+            self.auto_timeline_step(t)
+        elif self.auto_mode:
             every, unit = self.hold_time()
             self.auto_progress += dt / every if unit == 0 else beat / (every * (1 if unit == 1 else tp.beats_per_bar))
             if self.auto_progress >= 1:

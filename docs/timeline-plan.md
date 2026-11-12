@@ -6,6 +6,11 @@ a test copy before anything lands on main.
   `timeline`, `lookcheck` cleans it, the App starts it when a look comes on and applies value lanes each frame after
   the waves (a slider with a lane skips its wave). Tests: `tests/test_timeline.py`. No editor yet: a timeline only
   comes from a look file.
+- Step 2 (handover) done: `timeline.plan_outro` / `Playhead.pass_end` / `loop_passes`; `App.plan_leave` (from
+  `load_preset`: Take, tile clicks, previous / next, MIDI) and `App.leave_step` each frame; the outgoing look keeps
+  its playhead (`out_playhead`) while it fades; auto-play on a timeline look counts loop passes
+  (`auto_timeline_step`); a one-look playlist just keeps looping. Firing the look already on air, the crossfader
+  and random auto-play skip the outro. Cut and Morph don't overlap the outro.
 
 ## The idea in one paragraph
 

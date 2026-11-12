@@ -115,8 +115,9 @@ class AppLanes(unittest.TestCase):
                                    pvals=[0.0, 0.0])
         other = types.SimpleNamespace(id="zoom", removing=False, amt=0.4, amt_smooth=0.4, pvals=[0.0])
         fake = types.SimpleNamespace(tempo=types.SimpleNamespace(phase=0.0, beats_per_bar=4),
-                                     pipe=types.SimpleNamespace(order=[fx, other]),
-                                     set_auto_value=app.App.set_auto_value)
+                                     pipe=types.SimpleNamespace(order=[fx, other], outgoing=None),
+                                     set_auto_value=app.App.set_auto_value, out_playhead=None)
+        fake.apply_lanes = lambda ph, order, t: app.App.apply_lanes(fake, ph, order, t)
         lanes = [dict(effect="kaleido", key="amt", mode="value", mute=False, points=[[0, 0.0, "ramp"], [1, 1.0, "ramp"]]),
                  dict(effect="kaleido", key="p1", mode="value", mute=False, points=[[0, 0.7, "hold"]])]
         fake.playhead = T.Playhead(tl(length=4.0, lanes=lanes), beat=0.0, t=0.0)
@@ -126,6 +127,157 @@ class AppLanes(unittest.TestCase):
         self.assertAlmostEqual(fx.amt_smooth, 0.5)
         self.assertAlmostEqual(fx.pvals[1], 0.7)
         self.assertAlmostEqual(other.amt, 0.4)   # an effect with no lane is left alone
+
+
+
+def song(**kw):
+    """A 16-bar timeline: 4-bar intro, 8-bar loop (bars 4-12), 4-bar outro."""
+    return tl(length=16.0, intro_end=4.0, loop_end=12.0, **kw)
+
+
+class Outro(unittest.TestCase):
+    def test_outro_plays_once_after_outro_at(self):
+        ph = T.Playhead(song(), beat=0.0, t=0.0)
+        ph.outro_at = 20.0   # 2 loop passes done
+        self.assertEqual(ph.where(19 * 4, 0)[1], "loop")
+        self.assertEqual(ph.where(21 * 4, 0), (13.0, "outro", 2))
+        self.assertEqual(ph.where(30 * 4, 0)[1], "done")   # past its end: holds the last values
+
+    def test_no_outro_no_plan(self):
+        self.assertIsNone(T.plan_outro(T.Playhead(tl(length=8.0), 0.0, 0.0), 10.0, 0))
+        self.assertIsNone(T.plan_outro(T.Playhead(tl(length=16.0, intro_end=4.0, loop_end=16.0), 0.0, 0.0), 10.0, 0))
+
+    def test_finish_the_pass(self):
+        ph = T.Playhead(song(), beat=0.0, t=0.0)
+        self.assertEqual(T.plan_outro(ph, 6 * 4, 0), (12.0, 16.0))       # bar 6: the first pass ends at 12; the next look at 16
+        self.assertEqual(T.plan_outro(ph, 13 * 4, 0), (20.0, 24.0))      # bar 13: the second pass ends at 20
+        self.assertEqual(T.plan_outro(ph, 2 * 4, 0), (4.0, 8.0))         # in the intro: when the intro ends
+        self.assertEqual(T.plan_outro(ph, 12 * 4, 0), (12.0, 16.0))      # right on a pass end: now
+        self.assertEqual(T.plan_outro(ph, 6 * 4, 0, overlap=1.0), (12.0, 15.0))   # the next look overlaps its end
+        self.assertEqual(T.plan_outro(ph, 6 * 4, 0, overlap=9.0), (12.0, 12.0))   # never more than the outro
+
+    def test_jump(self):
+        ph = T.Playhead(song(), beat=0.0, t=0.0)
+        self.assertEqual(T.plan_outro(ph, 6 * 4 + 1, 0, jump=True), (6.25, 10.25))   # launch now: straight away
+        # launch on the bar: the outro ENDS on a bar line (bar 11 here)
+        self.assertEqual(T.plan_outro(ph, 6 * 4 + 1, 0, jump=True, grid=4), (7.0, 11.0))
+        # an 8-bar phrase: ends on bar 16
+        self.assertEqual(T.plan_outro(ph, 6 * 4 + 1, 0, jump=True, grid=32), (12.0, 16.0))
+        # phrases are counted from where beat 1 was set (bar_origin); this look started on beat 2
+        ph2 = T.Playhead(song(), beat=1.0, t=0.0)
+        start, _ = T.plan_outro(ph2, 1.0 + 6 * 4, 0, jump=True, grid=32, bar_origin=0.0)
+        self.assertAlmostEqual(1.0 + (start + 4.0) * 4, 64.0)   # ends on beat 64: the second phrase from the origin
+
+    def test_seconds_jump_ignores_the_beat_grid(self):
+        ph = T.Playhead(song(unit="seconds"), beat=0.0, t=100.0)
+        self.assertEqual(T.plan_outro(ph, 999, 107.5, jump=True, grid=4), (7.5, 11.5))
+
+    def test_loop_passes(self):
+        self.assertEqual(T.loop_passes(song(loops=3), 64), 3)       # its own count wins
+        self.assertEqual(T.loop_passes(song(), 16), 2)              # 16 bars of "every" = two 8-bar passes
+        self.assertEqual(T.loop_passes(song(), 2), 1)               # at least one
+
+
+class Handover(unittest.TestCase):
+    """The App's side: Take / auto-play schedule the handover, the next look comes in at the planned moment, and the
+    old look carries on with its outro while it fades out."""
+
+    def make(self, quantize=0, on_leave="finish", transition=0, secs=0.0):
+        import app
+        fake = types.SimpleNamespace()
+        for name in ("plan_leave", "leave_step", "load_preset", "look_style", "timeline_step", "apply_lanes",
+                     "auto_timeline_step", "playlist_step", "auto_step"):
+            setattr(fake, name, (lambda fn: (lambda *a, **k: fn(fake, *a, **k)))(app.App.__dict__[name]))
+        fake.set_auto_value = app.App.set_auto_value
+        clock = tempo.Tempo()
+        clock.bpm = 120.0
+        fx = types.SimpleNamespace(id="kaleido", removing=False, amt=0.0, amt_smooth=0.0, pvals=[])
+        lanes = [dict(effect="kaleido", key="amt", mode="value", mute=False,
+                      points=[[0, 0.0, "ramp"], [12, 0.5, "hold"], [12, 1.0, "ramp"], [16, 1.0, "ramp"]])]
+        fake.tempo, fake.quantize, fake.pending_look, fake.leaving = clock, quantize, None, None
+        fake.current_preset, fake.playlist, fake.fired = "A", ["A", "B", "C"], []
+        fake.auto_mode, fake.auto_every, fake.auto_unit, fake.auto_progress = 0, 8, 2, 0.0
+        fake.pipe = types.SimpleNamespace(order=[fx], outgoing=None, transition=transition, trans_secs=secs)
+        fake.meta = lambda name: dict(transition=-1, fade=1.0, fade_unit=0, hold=0, unit=0)
+        fake.hold_time = lambda: (fake.auto_every, fake.auto_unit)
+        fake.out_playhead = None
+        fake.playhead = T.Playhead(song(on_leave=on_leave, lanes=lanes), beat=0.0, t=0.0)
+        fake.fx = fx
+
+        def load(name, manual=False):   # the look comes in: a crossfade keeps the old chain as outgoing
+            fake.leaving = None
+            fake.fired.append((name, clock.phase))
+            fake.pipe.outgoing = dict(order=fake.pipe.order) if transition != 2 else None
+            fake.pipe.order = [types.SimpleNamespace(id="other", removing=False)]
+            fake.current_preset, fake.playhead = name, None
+        fake._load_preset = load
+        return fake
+
+    def run_to(self, fake, beat):
+        while fake.tempo.phase < beat - 1e-9:
+            fake.tempo.phase = min(beat, fake.tempo.phase + 0.25)
+            fake.leave_step(0.0)
+            if fake.auto_mode and fake.playhead is not None:
+                fake.auto_timeline_step(0.0)
+            fake.timeline_step(0.0)
+
+    def test_take_finishes_the_pass_then_the_outro(self):
+        f = self.make()
+        self.run_to(f, 6 * 4)        # bar 6, in the first loop pass
+        f.load_preset("B")           # Take
+        self.assertEqual(f.fired, [])
+        self.assertEqual(f.playhead.outro_at, 12.0)
+        self.run_to(f, 13 * 4)       # into the outro
+        self.assertEqual(f.playhead.where(f.tempo.phase, 0)[1], "outro")
+        self.assertAlmostEqual(f.fx.amt, 1.0)        # the outro's lane value (it jumps at bar 12)
+        self.run_to(f, 16 * 4)
+        self.assertEqual(f.fired, [("B", 16 * 4)])   # no overlap: B comes in as the outro ends
+
+    def test_the_next_look_overlaps_the_outro(self):
+        f = self.make(secs=4.0)      # a 4 s transition at 120 BPM = 2 bars
+        self.run_to(f, 6 * 4)
+        f.load_preset("B")
+        self.run_to(f, 14 * 4)
+        self.assertEqual(f.fired, [("B", 14 * 4)])   # 2 bars before the outro ends
+        self.assertIsNotNone(f.out_playhead)          # the old look keeps its outro going while it fades out
+        old_fx = f.out_playhead[1][0]
+        self.run_to(f, 15 * 4)
+        self.assertAlmostEqual(old_fx.amt, 1.0)
+
+    def test_a_cut_does_not_overlap(self):
+        f = self.make(transition=2, secs=4.0)
+        self.run_to(f, 6 * 4)
+        f.load_preset("B")
+        self.run_to(f, 17 * 4)
+        self.assertEqual(f.fired, [("B", 16 * 4)])
+
+    def test_jump_on_the_bar(self):
+        f = self.make(quantize=2, on_leave="jump")
+        self.run_to(f, 6 * 4 + 1)
+        f.load_preset("B")
+        self.assertEqual(f.playhead.outro_at, 7.0)   # so it ends on bar 11
+        self.run_to(f, 12 * 4)
+        self.assertEqual(f.fired, [("B", 11 * 4)])
+
+    def test_firing_again_while_leaving_changes_the_destination(self):
+        f = self.make()
+        self.run_to(f, 6 * 4)
+        f.load_preset("B")
+        f.load_preset("C")
+        self.run_to(f, 16 * 4)
+        self.assertEqual(f.fired, [("C", 16 * 4)])
+
+    def test_no_outro_loads_at_once(self):
+        f = self.make()
+        f.playhead = T.Playhead(tl(length=8.0), beat=0.0, t=0.0)
+        f.load_preset("B")
+        self.assertEqual(f.fired, [("B", 0.0)])
+
+    def test_auto_play_stays_for_whole_passes_then_plays_the_outro(self):
+        f = self.make()
+        f.auto_mode, f.auto_every, f.auto_unit = 1, 16, 2   # every 16 bars = two 8-bar passes
+        self.run_to(f, 40 * 4)
+        self.assertEqual(f.fired[0], ("B", 24 * 4))   # intro 4 + 2 passes (16) = bar 20, + the 4-bar outro = bar 24
 
 
 if __name__ == "__main__":

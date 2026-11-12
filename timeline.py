@@ -5,7 +5,7 @@ and two markers split it into three sections:
 
     intro   [0, intro_end)          plays once when the look comes on
     loop    [intro_end, loop_end)   repeats while the look stays on
-    outro   [loop_end, length)      plays when the look is leaving (the handover: a later step)
+    outro   [loop_end, length)      plays when the look is leaving (plan_outro: the handover to the next look)
 
 With no markers set the whole timeline loops. Each lane moves one slider of one effect (by effect id and setting key,
 the same keys the automate menu uses: "amt", "opacity", "speed", "xs", "xr", "p0".."pN") from point to point. A point
@@ -15,6 +15,8 @@ is [position, value, segment]: the segment says how it gets to the next point: "
 This module is plain arithmetic, no GPU or window, so it can be tested on its own. The App keeps one Playhead for
 the look on air and applies its lanes once a frame.
 """
+import math
+
 SEGMENTS = ("ramp", "ease", "hold")
 UNITS = ("bars", "seconds")
 KEYS_FIXED = ("amt", "opacity", "speed", "xs", "xr")   # plus "p0", "p1"... (an effect's own sliders)
@@ -59,12 +61,14 @@ def sections(tl):
 
 class Playhead:
     """Where the look on air is in its timeline. Started when the look comes on; time is counted on the tempo clock's
-    beats (bars unit), so it follows tempo changes, or in seconds."""
+    beats (bars unit), so it follows tempo changes, or in seconds. Once the look is told to leave, `outro_at` (in
+    elapsed time, the timeline's unit) is when its outro starts: from then on it plays the outro, once."""
 
     def __init__(self, tl, beat, t, beats_per_bar=4):
         self.tl = tl
         self.start_beat, self.start_t = beat, t
         self.beats_per_bar = beats_per_bar
+        self.outro_at = None
 
     def elapsed(self, beat, t):
         """Time since the start, in the timeline's unit."""
@@ -72,14 +76,32 @@ class Playhead:
             return max(0.0, t - self.start_t)
         return max(0.0, (beat - self.start_beat) / max(1, self.beats_per_bar))
 
+    def has_outro(self):
+        a, b, length = sections(self.tl)
+        return length - b > 1e-6
+
     def where(self, beat, t):
-        """(position on the timeline, section "intro" / "loop", loop passes completed)."""
+        """(position on the timeline, section "intro" / "loop" / "outro" / "done", loop passes completed)."""
         e = self.elapsed(beat, t)
-        a, b, _ = sections(self.tl)
+        a, b, length = sections(self.tl)
+        if self.outro_at is not None and e >= self.outro_at - 1e-9:
+            n = int(max(0.0, self.outro_at - a) // (b - a))
+            pos = min(length, b + (e - self.outro_at))
+            return pos, ("outro" if pos < length else "done"), n
         if e < a:
             return e, "intro", 0
         n, r = divmod(e - a, b - a)
         return a + r, "loop", int(n)
+
+    def pass_end(self, e):
+        """When the section playing at elapsed time e ends: the intro's end, or the end of this loop pass (now, if
+        it's right on the end of one)."""
+        a, b, _ = sections(self.tl)
+        if e < a:
+            return a
+        k = (e - a) / (b - a)
+        whole = math.floor(k + 1e-6)
+        return e if abs(k - whole) < 1e-6 else a + math.ceil(k) * (b - a)
 
     def values(self, beat, t):
         """{(effect id, key): value} for every lane, at the current position."""
@@ -90,6 +112,41 @@ class Playhead:
             if v is not None and lane.get("mode", "value") == "value" and not lane.get("mute"):
                 out[(lane["effect"], lane["key"])] = v
         return out
+
+
+def plan_outro(ph, beat, t, jump=False, grid=0.0, bar_origin=0.0, overlap=0.0):
+    """When a look is told to leave: (when its outro starts, when the next look should start coming in), both in the
+    playhead's elapsed time (the timeline's unit), or None if the timeline has no outro.
+
+    jump: the outro starts now (else the loop pass playing now finishes first). grid: the launch grid in beats
+    (0 = launch now) - a jump is then timed so the outro ENDS on a launch boundary (bars timelines only; counted
+    from bar_origin like the tempo clock's phrases). overlap: the next look's transition, in the timeline's unit -
+    it comes in that much before the outro ends, so the two overlap (never more than the outro itself)."""
+    if not ph.has_outro():
+        return None
+    a, b, length = sections(ph.tl)
+    outro = length - b
+    now = ph.elapsed(beat, t)
+    if not jump:
+        start = ph.pass_end(now)
+    elif grid > 0 and ph.tl.get("unit") != "seconds":
+        bpb = max(1, ph.beats_per_bar)
+        end_beat = ph.start_beat + (now + outro) * bpb            # the soonest it could end
+        k = math.ceil((end_beat - bar_origin) / grid - 1e-6)      # ... on the next launch boundary
+        start = (k * grid + bar_origin - ph.start_beat) / bpb - outro
+    else:
+        start = now
+    end = start + outro
+    return start, max(start, end - min(max(0.0, overlap), outro))
+
+
+def loop_passes(tl, every_units):
+    """How many loop passes auto-play stays for: the timeline's own `loops`, else as many as fit auto-play's
+    "every" (given in the timeline's unit), at least one."""
+    if tl.get("loops", 0) > 0:
+        return int(tl["loops"])
+    a, b, _ = sections(tl)
+    return max(1, round(every_units / (b - a)))
 
 
 def clean_timeline(tl, num, text):

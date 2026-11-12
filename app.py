@@ -1656,7 +1656,8 @@ class App:
             return self.current_preset == key
         if scope == "app":
             return {"play": lambda: bool(self.auto_mode), "record": lambda: self.recorder.recording,
-                    "take": lambda: bool(self.cued or self.xf_live)}.get(key, lambda: None)()
+                    "take": lambda: bool(self.cued or self.xf_live),
+                    "outro": lambda: bool(self.leaving)}.get(key, lambda: None)()
         c = self.midi_control(target)
         return bool(c[3]()) if c and c[0] == "toggle" else None
 
@@ -1720,6 +1721,7 @@ class App:
                 "tap": ("trigger", 0, 1, None, lambda: self.tempo.tap(glfw.get_time()), "Tap tempo"),
                 "xfade": ("range", 0.0, 1.0, lambda: self.xfader, self.set_xfader, "Crossfader"),
                 "take": ("trigger", 0, 1, None, self.take, "Take (bring the cued look on)"),
+                "outro": ("trigger", 0, 1, None, lambda: self.go_outro(), "Outro (the look leaves through its outro now)"),
                 "cue_next": ("trigger", 0, 1, None, lambda: self.cue_step(1), "Cue next look"),
                 "cue_prev": ("trigger", 0, 1, None, lambda: self.cue_step(-1), "Cue previous look"),
                 "record": ("trigger", 0, 1, None, self.toggle_record, "Record on / off"),
@@ -2210,6 +2212,24 @@ class App:
         self.leaving = dict(name=name, next_at=next_at)
         self.pending_look = None
         return True
+
+    def go_outro(self):
+        """The Outro key / pad: the look on air leaves through its outro now (on the launch beat, bar or phrase if
+        set), and the cued look - or else the next one in the playlist - comes in."""
+        ph = self.playhead
+        if ph is None or not ph.has_outro():
+            return
+        here = self.timeline_name or self.current_preset
+        name = (self.leaving or {}).get("name") or self.cued
+        if name is None and here in self.playlist and len(self.playlist) > 1:
+            name = self.playlist[(self.playlist.index(here) + 1) % len(self.playlist)]
+        if name is None or name == here:
+            self.flash("Cue a look first (or add another to the playlist): the outro leads into it", 3)
+            return
+        if self.cued == name:
+            self.cued = None
+        self.leaving, ph.outro_at = None, None   # a finish-the-pass handover already waiting becomes a jump
+        self.load_preset(name, jump=True)
 
     def leave_step(self, t):
         """Once a frame: when a look leaving through its outro reaches the moment, bring the next one in. The old

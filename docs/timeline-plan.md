@@ -26,6 +26,12 @@ a test copy before anything lands on main.
   point or the section's end (`Playhead.hold_until`, `App.lane_hold`). The card's Automate button shows a violet
   timeline mark for a value lane, a violet wave for a depth lane. `App.timeline_name` keeps the playing look known
   after a MIDI tweak clears the current look.
+- Step 6 (polish) done: editor undo / redo (`tl_changed` keeps one step per saved change, `tl_undo`, Ctrl+Z / Y
+  while the editor has focus: `S.tl_hot`), zoom and scroll (`ed["view"]`, Ctrl / Shift + wheel; the interface's own
+  Ctrl+wheel zoom steps aside: `S.tl_wheel`), selection (Ctrl+click, Ctrl+drag box), moving several points, Delete,
+  Ctrl+C / V (`S.tl_clip`), Ctrl+A, the point menu acting on the selection; "(from its Intro)" lanes (`intro_lane`);
+  tile badges (`tile_timeline`: timeline mark, section and loop pass); the Outro key in the deck and MIDI target
+  ("app", "outro") (`App.go_outro`); the editor's keys in F1.
 
 ## The idea in one paragraph
 

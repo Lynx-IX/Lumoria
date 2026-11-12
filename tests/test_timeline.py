@@ -341,5 +341,77 @@ class DepthAndTakeover(unittest.TestCase):
         self.assertAlmostEqual(fx.pvals[0], 0.9)        # no timeline: the full swing
 
 
+class Polish(unittest.TestCase):
+    def test_intro_wave_to_lane(self):
+        import ui
+        app_ = types.SimpleNamespace(tempo=tempo.Tempo())
+        app_.tempo.bpm, app_.tempo.beats_per_bar = 120.0, 4
+        intro = dict(shape=9, rate=2.0, unit=2, lo=0.1, hi=0.9, ease=3)    # 2 bars, linear
+        lane = ui.intro_lane(app_, song(), "kaleido", "amt", intro)
+        self.assertEqual(lane["points"], [[0.0, 0.1, "ramp"], [2.0, 0.9, "hold"]])
+        intro = dict(shape=9, rate=6.0, unit=1, lo=0.0, hi=1.0, ease=0)    # 6 beats, smooth
+        self.assertEqual(ui.intro_lane(app_, song(), "k", "p0", intro)["points"][1][:1], [1.5])
+        intro = dict(shape=9, rate=4.0, unit=0, lo=0.0, hi=1.0)            # 4 s at 120 BPM = 2 bars
+        self.assertAlmostEqual(ui.intro_lane(app_, song(), "k", "p0", intro)["points"][1][0], 2.0)
+        intro = dict(shape=9, rate=99.0, unit=2, lo=0.0, hi=1.0)           # never longer than the timeline
+        self.assertEqual(ui.intro_lane(app_, song(), "k", "p0", intro)["points"][1][0], 16.0)
+
+    def test_editor_undo(self):
+        import ui
+        saved = []
+        app_ = types.SimpleNamespace(edit_timeline=lambda name, tl_: saved.append(json.dumps(tl_)))
+        ui.S.tl = dict(name="A", tl=song(), drag=None, sel=set(), hist=[], future=[], last=json.dumps(song()))
+        try:
+            ui.S.tl["tl"]["length"] = 8.0
+            ui.tl_changed(app_)
+            ui.S.tl["tl"]["grid"] = 1.0
+            ui.tl_changed(app_)
+            ui.tl_changed(app_)                       # nothing changed: no extra step
+            self.assertEqual(len(ui.S.tl["hist"]), 2)
+            ui.tl_undo(app_)
+            self.assertEqual((ui.S.tl["tl"]["length"], ui.S.tl["tl"]["grid"]), (8.0, 0.25))
+            ui.tl_undo(app_)
+            self.assertEqual(ui.S.tl["tl"]["length"], 16.0)
+            ui.tl_undo(app_)                          # nothing left: stays
+            self.assertEqual(ui.S.tl["tl"]["length"], 16.0)
+            ui.tl_undo(app_, redo=True)
+            ui.tl_undo(app_, redo=True)
+            self.assertEqual((ui.S.tl["tl"]["length"], ui.S.tl["tl"]["grid"]), (8.0, 1.0))
+            self.assertEqual(json.loads(saved[-1])["grid"], 1.0)   # each step is saved (and played, if on air)
+            ui.S.tl["tl"]["length"] = 4.0
+            ui.tl_changed(app_)
+            self.assertEqual(ui.S.tl["future"], [])   # a new edit forgets what could be redone
+        finally:
+            ui.S.tl = None
+
+
+class OutroKey(Handover):
+    def make(self, **kw):
+        import app
+        f = super().make(**kw)
+        f.go_outro = (lambda fn: (lambda *a, **k: fn(f, *a, **k)))(app.App.__dict__["go_outro"])
+        f.cued, f.flash = None, lambda *a, **k: None
+        return f
+
+    def test_outro_now_into_the_next_look(self):
+        f = self.make()
+        self.run_to(f, 6 * 4 + 1)
+        f.go_outro()
+        self.assertAlmostEqual(f.playhead.outro_at, 6.25)   # now, not at the end of the pass
+        self.run_to(f, 12 * 4)
+        self.assertEqual(f.fired, [("B", 10.25 * 4)])       # the 4-bar outro, then the next look
+
+    def test_outro_into_the_cued_look_and_jumping_a_waiting_handover(self):
+        f = self.make()
+        self.run_to(f, 6 * 4)
+        f.load_preset("C")             # waits for the end of the pass (bar 12) ...
+        self.assertEqual(f.playhead.outro_at, 12.0)
+        self.run_to(f, 7 * 4)
+        f.go_outro()                   # ... until the Outro key: now, still into C
+        self.assertEqual(f.playhead.outro_at, 7.0)
+        self.run_to(f, 12 * 4)
+        self.assertEqual(f.fired, [("C", 11 * 4)])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -250,6 +250,16 @@ tab); *Make a timeline* gives it one, 8 bars long.
 - **Value or depth:** the button left of the eye switches a lane between *value* (it sets the slider) and *depth* (it
   sets how far the slider's wave swings, 1 = its whole From-To range, 0 = still in the middle) - e.g. a wave that's
   subtle in the intro and wide by the drop. A depth lane needs a wave on the slider (its Automate button).
+- **Editing many points:** Ctrl+click or Ctrl+drag a box selects points (in any lanes); drag one of them to move them
+  all, Delete removes them, Ctrl+C / Ctrl+V copies and pastes them at the mouse (one lane's points can go into
+  another lane, scaled to its slider), Ctrl+A selects every point, right-click sets the segment of all of them.
+  Ctrl+Z / Ctrl+Y undo and redo timeline edits while the editor is the window you're in.
+- **Zoom:** Ctrl + wheel over the lanes zooms, Shift + wheel scrolls, *Fit* shows it all again.
+- **From an Intro:** a slider whose wave is an *Intro* (From -> To once) shows "(from its Intro)" in *+ Lane*: that
+  draws the Intro as a lane you can then reshape.
+- **On the tiles:** a look with a timeline shows a timeline mark; while it plays, which section it's in and its loop
+  pass. The **Outro** key beside Take (and a MIDI pad: MIDI learn, then click it) makes the look leave through its
+  outro now, into the cued look or the next one.
 - **Taking over:** grab a slider that a lane moves - on its card, or with its MIDI control - and it's yours until the
   lane's next point (or the end of the section playing), then the lane takes it back.
 - **Intro / loop / outro:** drag the two markers on the ruler. The intro plays once when the look comes on, the loop

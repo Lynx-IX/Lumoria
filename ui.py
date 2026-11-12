@@ -4471,7 +4471,10 @@ def deck(app, panel=False):
 TL_GRIDS = {"bars": [(1 / 16, "1/4 beat"), (0.25, "Beat"), (0.5, "1/2 bar"), (1.0, "Bar")],
             "seconds": [(0.1, "0.1 s"), (0.25, "0.25 s"), (0.5, "0.5 s"), (1.0, "1 s")]}
 TL_LANE_H, TL_RULER_H, TL_NAMES_W = 58, 26, 200
-TL_SEG_NAMES = {"ramp": "Ramp (straight line)", "ease": "Ease (smooth in and out)", "hold": "Hold, then jump"}
+TL_SEG_NAMES = {"ramp": "Ramp (straight line)", "ease": "Ease (smooth in and out)",
+                "ease_in": "Ease in (starts slow)", "ease_out": "Ease out (slows down)",
+                "sharp_in": "Swell (exponential, rushes in)", "sharp_out": "Attack (fast, then settles)",
+                "bounce": "Bounce (lands and bounces)", "hold": "Hold, then jump"}
 
 
 def new_timeline():
@@ -4818,7 +4821,7 @@ def intro_lane(app, tl, eid, key, a):
         dur = rate if unit == 2 else rate / max(1, tp.beats_per_bar) if unit == 1 else \
             rate * tp.bpm / 60.0 / max(1, tp.beats_per_bar)
     dur = min(max(dur, tl.get("grid", 0.25)), tl["length"])
-    seg = "ramp" if a.get("ease", 0) == 3 else "ease"
+    seg = ("ease", "ease_out", "ease_in", "ramp")[min(3, max(0, a.get("ease", 0)))]   # as the Intro eased
     return dict(effect=eid, key=key, mode="value", mute=False,
                 points=[[0.0, a.get("lo", 0.0), seg], [dur, a.get("hi", 1.0), "hold"]])
 
@@ -5081,10 +5084,11 @@ def timeline_lane(app, ed, lane, li, rect, lo, hi, fmt, x_of, pos_of, snap, dl):
             line.append(V(x_of(x0), y_of(v0)))
             if seg == "hold":
                 line.append(V(x_of(x1_), y_of(v0)))
-            elif seg == "ease":
-                for k in range(1, 16):
-                    u = k / 16
-                    line.append(V(x_of(x0 + (x1_ - x0) * u), y_of(v0 + (v1 - v0) * u * u * (3 - 2 * u))))
+            elif seg != "ramp":   # a curve: drawn through enough steps to show its shape (bounces need more)
+                n = 48 if seg == "bounce" else 20
+                for k in range(1, n):
+                    u = k / n
+                    line.append(V(x_of(x0 + (x1_ - x0) * u), y_of(v0 + (v1 - v0) * timeline.shape(seg, u))))
         line.append(V(x_of(pts[-1][0]), y_of(pts[-1][1])))
         line.append(V(max(gx1, x_of(pts[-1][0])), y_of(pts[-1][1])))
         dl.add_polyline(points=line, col=u32(col), thickness=2.0, flags=0)
@@ -5131,7 +5135,7 @@ def timeline_lane(app, ed, lane, li, rect, lo, hi, fmt, x_of, pos_of, snap, dl):
             ed["drag"] = ("point", li, id(p))
     if imgui.is_item_clicked(1) and near is not None:
         ed["menu"] = (li, id(pts[near]))
-        imgui.open_popup("tl_point")
+        ed["menu_open"] = True   # opened by timeline_point_menu, in its own ID scope (not this lane's)
     if ed["drag"] and ed["drag"][0] == "point" and ed["drag"][1] == li:
         p = next((q for q in pts if id(q) == ed["drag"][2]), None)
         if p is not None:
@@ -5141,6 +5145,8 @@ def timeline_lane(app, ed, lane, li, rect, lo, hi, fmt, x_of, pos_of, snap, dl):
 
 
 def timeline_point_menu(app, ed):
+    if ed.pop("menu_open", False):
+        imgui.open_popup("tl_point")
     if not imgui.begin_popup("tl_point"):
         return
     li, pid = ed["menu"] or (None, None)
@@ -5154,10 +5160,20 @@ def timeline_point_menu(app, ed):
     many = len(group) > 1
     imgui.text_colored(DIM, f"From these {len(group)} points to the next:" if many else "From this point to the next:")
     for seg, text in TL_SEG_NAMES.items():
-        if imgui.menu_item_simple(text, "", all(q[2] == seg for q in group)):
+        # a small picture of the shape on the left, then its name
+        p0 = imgui.get_cursor_screen_pos()
+        bw, bh = sc(34), imgui.get_text_line_height() - 2
+        if imgui.menu_item_simple(f"{' ' * 14}{text}", "", all(q[2] == seg for q in group)):
             for q in group:
                 q[2] = seg
             tl_changed(app)
+        dl = imgui.get_window_draw_list()
+        a, b = V(p0.x + 2, p0.y + 1), V(p0.x + 2 + bw, p0.y + 1 + bh)
+        dl.add_rect_filled(a, b, u32(FRAME), 2)
+        pts_ = [V(a.x + bw * k / 24, b.y - bh * timeline.shape(seg, k / 24)) for k in range(25)]
+        if seg == "hold":
+            pts_ = [V(a.x, b.y), V(b.x - 1, b.y), V(b.x - 1, a.y)]
+        dl.add_polyline(points=pts_, col=u32(CYAN), thickness=1.5, flags=0)
     imgui.separator()
     if imgui.menu_item_simple(f"{fa.ICON_FA_TRASH}   Delete {'these points' if many else 'point'}"):
         gone = {id(q) for q in group}

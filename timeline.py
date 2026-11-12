@@ -10,14 +10,45 @@ and two markers split it into three sections:
 With no markers set the whole timeline loops. Each lane moves one slider of one effect (by effect id and setting key,
 the same keys the automate menu uses: "amt", "opacity", "speed", "xs", "xr", "p0".."pN") from point to point. A point
 is [position, value, segment]: the segment says how it gets to the next point: "ramp" (a straight line), "ease"
-(smooth in and out) or "hold" (stays, then jumps at the next point).
+(smooth in and out), "ease_in" / "ease_out", "sharp_in" / "sharp_out" (exponential), "bounce", or "hold" (stays,
+then jumps at the next point). See shape().
 
 This module is plain arithmetic, no GPU or window, so it can be tested on its own. The App keeps one Playhead for
 the look on air and applies its lanes once a frame.
 """
 import math
 
-SEGMENTS = ("ramp", "ease", "hold")
+SEGMENTS = ("ramp", "ease", "ease_in", "ease_out", "sharp_in", "sharp_out", "bounce", "hold")
+
+
+def shape(seg, u):
+    """How far (0..1) a segment of that shape has got at u (0..1) of the way to the next point. Every shape stays
+    between the two points' values, so a lane never pushes a slider past them."""
+    if seg == "ease":        # smooth in and out
+        return u * u * (3 - 2 * u)
+    if seg == "ease_in":     # starts slow, speeds up
+        return u * u * u
+    if seg == "ease_out":    # starts fast, slows down
+        return 1 - (1 - u) ** 3
+    if seg == "sharp_in":    # an exponential swell: hardly moves, then rushes in
+        return (2 ** (10 * u) - 1) / 1023
+    if seg == "sharp_out":   # a quick attack that settles
+        return 1 - (2 ** (10 * (1 - u)) - 1) / 1023
+    if seg == "bounce":      # lands and bounces a few times, smaller each time
+        n, d = 7.5625, 2.75
+        if u < 1 / d:
+            return n * u * u
+        if u < 2 / d:
+            u -= 1.5 / d
+            return n * u * u + .75
+        if u < 2.5 / d:
+            u -= 2.25 / d
+            return n * u * u + .9375
+        u -= 2.625 / d
+        return n * u * u + .984375
+    return 0.0 if seg == "hold" else u
+
+
 UNITS = ("bars", "seconds")
 KEYS_FIXED = ("amt", "opacity", "speed", "xs", "xr")   # plus "p0", "p1"... (an effect's own sliders)
 MAX_LANES = 64
@@ -40,10 +71,7 @@ def value_at(points, pos):
         if pos < x1:
             if seg == "hold" or x1 <= x0:
                 return v0
-            u = (pos - x0) / (x1 - x0)
-            if seg == "ease":
-                u = u * u * (3 - 2 * u)
-            return v0 + (v1 - v0) * u
+            return v0 + (v1 - v0) * shape(seg, (pos - x0) / (x1 - x0))
     return points[-1][1]
 
 

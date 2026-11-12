@@ -497,5 +497,34 @@ class BeatOne(unittest.TestCase):
         self.assertEqual(fake.playhead.start_beat, 9)   # the timeline's bars moved with it (by the nearest way)
 
 
+class Shapes(unittest.TestCase):
+    def test_every_shape_goes_from_one_point_to_the_next_and_stays_between(self):
+        for seg in T.SEGMENTS:
+            if seg == "hold":
+                continue
+            self.assertAlmostEqual(T.shape(seg, 0.0), 0.0, places=3, msg=seg)
+            self.assertAlmostEqual(T.shape(seg, 1.0), 1.0, places=3, msg=seg)
+            for k in range(101):
+                self.assertTrue(-1e-9 <= T.shape(seg, k / 100) <= 1 + 1e-9, (seg, k))
+
+    def test_the_shapes(self):
+        pts = lambda seg: [[0, 0.0, seg], [1, 1.0, "ramp"]]
+        self.assertAlmostEqual(T.value_at(pts("ease_in"), 0.5), 0.125)
+        self.assertAlmostEqual(T.value_at(pts("ease_out"), 0.5), 0.875)
+        self.assertLess(T.value_at(pts("sharp_in"), 0.5), 0.05)       # hardly moves at first
+        self.assertGreater(T.value_at(pts("sharp_out"), 0.5), 0.95)   # most of the way at once
+        self.assertEqual(T.value_at(pts("hold"), 0.99), 0.0)
+        b = [T.value_at(pts("bounce"), k / 200) for k in range(201)]
+        dips = sum(1 for i in range(1, 200) if b[i] < b[i - 1] and b[i] < b[i + 1])
+        self.assertGreaterEqual(dips, 2)                               # it bounces
+        self.assertAlmostEqual(T.value_at([[0, 1.0, "ease_in"], [2, 0.0, "ramp"]], 1.0), 0.875)   # downward too
+
+    def test_new_shapes_survive_cleaning(self):
+        look = dict(effects=[], timeline=tl(lanes=[dict(effect="k", key="amt", points=[[0, 0.2, s], [1, 0.4, "ramp"]])
+                                                   for s in ("bounce", "sharp_out", "nonsense")]))
+        segs = [ln["points"][0][2] for ln in clean_look(look)["timeline"]["lanes"]]
+        self.assertEqual(segs, ["bounce", "sharp_out", "ramp"])
+
+
 if __name__ == "__main__":
     unittest.main()

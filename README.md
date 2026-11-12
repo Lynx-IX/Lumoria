@@ -249,8 +249,10 @@ tab); *Make a timeline* gives it one, 8 bars long.
   timeline on it. A slider with a wave also offers **Add depth lane**; one that has a lane offers to open it.
 - **Lanes:** *+ Lane* picks an effect in the look and one of its sliders (the same ones its card can automate).
   Click a lane to add a point, drag a point to move it (it snaps to the *Grid*; hold Shift to place it freely),
-  right-click a point to choose how it gets to the next one - *Ramp* (a straight line), *Ease* (smooth in and out)
-  or *Hold, then jump* - or to delete it. The eye mutes a lane, × removes it. A slider with a lane follows the lane,
+  right-click a point to choose how it gets to the next one, or to delete it. The shapes (each with a little picture
+  in the menu): *Ramp* (a straight line), *Ease* (smooth in and out), *Ease in* (starts slow), *Ease out* (slows
+  down), *Swell* (exponential: hardly moves, then rushes in), *Attack* (fast, then settles), *Bounce* (lands and
+  bounces) and *Hold, then jump*. Every shape stays between the two points' values. The eye mutes a lane, × removes it. A slider with a lane follows the lane,
   not its wave; its Automate button turns into a violet timeline mark.
 - **Value or depth:** the button left of the eye switches a lane between *value* (it sets the slider) and *depth* (it
   sets how far the slider's wave swings, 1 = its whole From-To range, 0 = still in the middle) - e.g. a wave that's

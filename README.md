@@ -124,8 +124,9 @@ They live in `samples/`; the welcome (Settings > About > Show the welcome again)
   setting (Dissolve or Grow over its time, or Cut). Put it on a MIDI pad: MIDI learn, then click the arrow.
   Screens and windows capture at 30 or 60 fps. Capture uses DXGI desktop duplication (the same method as OBS's
   Display Capture: very little CPU), so a full 1440p screen keeps up at 60. Windows have *Fast* (cut from that
-  screen capture, so keep the window visible) or *Behind others* (keeps working while covered, slower for big
-  windows). The self-test reports whether fast capture works on a PC; where it doesn't, capture falls back to the
+  screen capture, so anything over the window shows too) or *Behind others* (the window's own picture through
+  Windows Graphics Capture, like OBS's window capture: other windows on top don't show, and browser video - e.g.
+  YouTube full screen - works; where Windows Graphics Capture isn't available it falls back to the older, slower way). The self-test reports whether fast capture works on a PC; where it doesn't, capture falls back to the
   older way (about 30 fps).
   Add a *Media Layer* effect (Sources) to put one into the chain: Fill / Fit inside / Stretch, size, position
   (Centre or Pick), rotation, rounded corners, neon border, and *Show: Person only (AI)* to place just the person

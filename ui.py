@@ -2186,8 +2186,10 @@ def source_picker(app, target, desc, src):
             imgui.same_line(0, 6)
             m = segmented(f"meth{target}", ("Fast", "Behind others"), 0 if method == "smooth" else 1, VIOLET)
             if imgui.is_item_hovered():
-                imgui.set_tooltip("Fast: grabbed from the screen; the window must be visible (not covered)\n"
-                                  "Behind others: keeps working when covered, but much slower for big windows")
+                imgui.set_tooltip("Fast: cut from the screen, so whatever covers the window shows too (keep it on top)\n"
+                                  "Behind others: the window's own picture (Windows Graphics Capture, like OBS's window\n"
+                                  "capture): windows over it don't show, and browser video works - use this for a\n"
+                                  "full-screen YouTube or a game with other windows on that screen")
             method = ("smooth", "compatible")[m]
         if (30, 60)[rate] != desc.get("fps", 30) or method != desc.get("method", "smooth"):
             app.choose_source(target, {**desc, "fps": (30, 60)[rate], "method": method})

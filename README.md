@@ -53,7 +53,7 @@ several years: NVIDIA, AMD or Intel). OBS Studio is optional; the Spout2 plugin 
 ## Getting it into OBS
 - **Spout (best quality):** press **Spout** in Lumoria's top bar, then in OBS add a *Spout2 Capture* source
   (from the [Spout2 plugin for OBS](https://github.com/Off-World-Live/obs-spout2-plugin)) and pick *Lumoria*.
-  Full resolution straight from the graphics card, and a transparent background (Background Eraser set to
+  Full resolution straight from the graphics card, and a transparent background (the *Background* effect set to
   *Transparent*) stays transparent.
 - **Window Capture:** Add Source → Window Capture → *Lumoria Output*, capture method *Windows 10 (1903 and up)*.
   Keep the output window open (it can sit behind other windows, just not minimised).
@@ -82,7 +82,7 @@ They live in `samples/`; the welcome (Settings > About > Show the welcome again)
   cutting things off: the readout moves to the right-hand corner with the keys under it; narrower still, the keys
   become small icon keys (hover one for its name) stacked in rows in the corner, and the source's name in the readout
   is shortened.
-- **Settings** (top bar) drops down a short menu of its sections (AI Mask, Tempo, Transitions, Output, MIDI,
+- **Settings** (top bar) drops down a short menu of its sections (Person detection, Tempo, Transitions, Output, MIDI,
   Interface, About), all folded. Click one and it opens in a panel to the right of the menu; clicking another
   switches to it (one is open at a time), and clicking the open one again folds it. Esc or a click outside closes
   Settings.
@@ -124,14 +124,23 @@ They live in `samples/`; the welcome (Settings > About > Show the welcome again)
   windows). The self-test reports whether fast capture works on a PC; where it doesn't, capture falls back to the
   older way (about 30 fps).
   Add a *Media Layer* effect (Sources) to put one into the chain: Fill / Fit inside / Stretch, size, position
-  (Centre or Pick), rotation, rounded corners, neon border. Fill + *Apply to: Background* puts a video behind
-  you; inside a group it can have its own effects. Sources are remembered between launches.
+  (Centre or Pick), rotation, rounded corners, neon border, and *Show: Person only (AI)* to place just the person
+  from that source (its own person mask). Fill + *Apply to: Background* puts a video behind you (that uses the
+  main source's mask: where *you* are); inside a group it can have its own effects. Sources are remembered
+  between launches.
   To give one video its own effects without touching anything else, set a group's *Start from* to that
   source (Source 2-4): its effects then work on that video alone, and the group places the result in the
   picture with Size / Fit / Position (Pick) / Rotate / Rounded / Border, like a Media Layer.
-- **AI Mask** (sidebar): quality (Fast / Balanced / High / Max), Edge refine (a guided filter that snaps the AI's
-  edge onto the real edges in the camera image) and Stability (less edge flicker). Shared by Background Eraser,
-  Tracers, Neon Edges' person outline and every effect's *Apply to*. *Show mask on preview* helps tuning.
+- **Person mask and Person detection:** the AI finds the person in a source (the *person mask*). It changes nothing
+  by itself; it's what the *Background* effect (replace or remove the background), every effect's *Apply to*,
+  Tracers, Neon Edges' person outline, a source group's *Cut out person* and a Media Layer's *Person only* use.
+  - Each source in the Input card has a **person button** beside it: *Auto* (the default: the mask runs only while
+    something needs it, and the button lights while it does) or *Off* (never, e.g. for a screen or game with nobody
+    in it; anything that asks then treats the whole picture as the person). Each of Sources 2-4 has its own mask,
+    for its source group or Media Layer.
+  - *Settings → Person detection* sets how the masks are made, for every source: quality (Fast / Balanced / High /
+    Max), Edge refine (a guided filter that snaps the AI's edge onto the real edges in the picture), Stability (less
+    edge flicker) and the captured background. *Show mask on preview* helps tuning.
 - **Auto-save:** the current setup is saved every few seconds and on exit (`presets/_session.json`) and comes
   back on the next launch, including after *Update ready - restart*. Save a look to keep a setup permanently.
 - **Resizing:** drag the lines between panels; *Interface → UI size* (or Ctrl + mouse wheel) scales all text and
@@ -175,7 +184,20 @@ it follow the music; the button lights magenta. The menu has:
 - Live **Hearing** and **Moving it** meters show what it hears and what it drives.
 
 Different sliders on one effect can follow different sounds: the kaleidoscope's zoom on the hats, its rotation on
-the bass. Settings are saved with looks. *Hit sensitivity* (Audio card) sets how easily a drum counts as a hit.
+the bass. Settings are saved with looks.
+
+**Drum hits:** the Audio card has a sensitivity for each drum, *Kick hits*, *Snare hits* and *Hat hits*: how easily
+that drum counts as a hit (low: only the clearest, high: every little one). They're separate, so you can raise the
+hats until quiet ones light up without the kick getting jumpy; watch the hit lights under them while you set them.
+How each is told apart from the rest of the mix:
+- **Kick:** the low thump and the pitch sweep coming down through 120-250 Hz, together, on the plain loudness. A
+  bassline's new notes rise in the low end as much as a kick but hardly in the sweep's range, so they don't count
+  (808-style kicks with little sweep still do). A kick also has to be a good part as strong as the recent ones.
+- **Snare / clap:** its crack (1.5-5 kHz). A kick's click reaches up there too, so right on a kick only a crack
+  nearly as big as the recent snares counts (a real snare on the same beat still does).
+- **Hats:** the top end (7-14 kHz) jumping more than the snare's range does; fainter hats count than before.
+
+A session saved with the older single *Hit sensitivity* loads with all three set to it.
 *Smoothness* sets how gradually audio-driven effects rise and fall: 0 is quick and percussive, 1 is slow and flowing (good for ambient music).
 Effects that follow the sound have a **Music** setting: *Reactive* (follows it as it happens), *Swell* (breathes with how loud it has
 been), *Flow* (drifts on a clock that speeds up with the music) or *Rhythmic* (moves in time with the beat), plus a *Response* slider for
@@ -262,7 +284,7 @@ cut-out, and each has its own palette and colour motion:
 - **Aurora Field:** a flowing field of colour driven by the music's slow side: Energy swells it, Brightness shifts its
   colour, Busyness stirs it, the Pan leans it left or right, and every kick flares it (curtains, nebula or ribbons).
 
-All of them answer to *Hit sensitivity* and the audio input chosen on the Audio card, and their sliders can follow
+All of them answer to the drum hit sensitivities and the audio input chosen on the Audio card, and their sliders can follow
 the sound too (the wave button at the end of a slider's row).
 
 ## 3D effects

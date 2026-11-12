@@ -162,7 +162,7 @@ class Effect:
         for prog in [self.prog] + [p for p, _ in self.state_passes]:
             for name, unit in (("u_tex", 0), ("u_prev", 1), ("u_clean", 2), ("u_mask", 3),
                                ("u_s0", 4), ("u_s1", 5), ("u_m0", 6), ("u_m1", 7), ("u_m2", 8),
-                               ("u_audiotex", 9), ("u_plate", 11)):
+                               ("u_audiotex", 9), ("u_plate", 11), ("u_cut", 12)):
                 set_u(prog, name, unit)
         # the effect's own colours for the "Custom" palette (2 to effects.MAX_COLOURS)
         self.colours = [list(c) for c in DEFAULT_COLOURS]
@@ -281,13 +281,15 @@ class Effect:
 
 
 class SourceMask:
-    """The AI person mask for one of Sources 2-4 (for source groups): the raw mask from its own segmenter,
-    refined and stabilised against that source's own picture like the main camera's, plus a small copy of the
-    picture for the segmenter (read back a frame later so the GPU never stalls)."""
+    """The AI person mask for one of Sources 2-4 (for source groups and Media Layers set to Person only): the raw
+    mask from its own segmenter, refined and stabilised against that source's own picture (stretched to the frame,
+    `frame`) like the main camera's, plus a small copy of the picture for the segmenter (read back a frame later
+    so the GPU never stalls)."""
 
     def __init__(self, ctx, size, small_size):
         self.raw = ctx.texture((32, 32), 1, bytes(32 * 32))
         self.refs = [Target(ctx, *size) for _ in range(2)]
+        self.frame = Target(ctx, *size)
         self.i, self.fresh, self.tex = 0, True, None
         self.small = Target(ctx, *small_size)
         self.pbo, self.full, self.ready = [ctx.buffer(reserve=small_size[0] * small_size[1] * 3) for _ in range(2)], \
@@ -303,7 +305,7 @@ class SourceMask:
         self.raw.write(np.ascontiguousarray(mask), alignment=1)
 
     def release(self):
-        for o in [self.raw, self.small] + self.refs + self.pbo:
+        for o in [self.raw, self.small, self.frame] + self.refs + self.pbo:
             o.release()
 
 
@@ -385,6 +387,8 @@ class Pipeline:
         self.alpha_out = None              # (edge softness, matte middle) while an eraser makes the background transparent
         self.slot_masks = [None] * 3       # SourceMask per Source 2-4, made when a source group needs one
         self.main_mask = None              # the texture on unit 3 this frame (the main camera's refined mask)
+        self.full_mask = ctx.texture((1, 1), 1, bytes([255]))   # a source's mask switched off: all of it is "person"
+        self.mask_off = False              # the main source's Person mask is set to Off (Input card)
         # two complete effect sets, so the outgoing look can keep running while the next one fades in
         # (extra copies made with Duplicate are appended to these, see new_copy)
         self.libs = [[Effect(ctx, s) for s in E.EFFECTS] for _ in range(2)]
@@ -749,7 +753,19 @@ class Pipeline:
         for prog, _ in self.gf_progs:
             set_u(prog, "u_plate_on", plate_on)
             set_u(prog, "u_plate_k", self.plate_strength)
-        if self.mask_active:
+        for slot, sm in enumerate(self.slot_masks):   # Sources 2-4 with their own person mask running
+            if sm and sm.active:
+                live = self.media_live[slot] and self.media_tex[slot] is not None
+                sm.frame.fbo.use()
+                (self.media_tex[slot] if live else self.blank).use(0)
+                set_u(self.copy_prog, "u_tex", 0)
+                self.copy_vao.render(vertices=3)
+                sm.tex, sm.i, sm.fresh = self.refine_into(sm.raw, sm.refs, sm.i, sm.fresh, sm.frame.tex)
+                self.grab_slot_small(sm, sm.frame.tex)
+        if self.mask_off:
+            self.main_mask = self.full_mask
+            self.ref_fresh = True
+        elif self.mask_active:
             self.main_mask = self.refine_mask()
         else:
             self.main_mask = self.mask_tex
@@ -795,7 +811,7 @@ class Pipeline:
             return
         self.out.fbo.use()
         inp.use(0)
-        if self.alpha_out:   # Background Eraser > Transparent: the alpha travels out (Spout)
+        if self.alpha_out:   # Background > Transparent: the alpha travels out (Spout)
             set_u(self.alpha_prog, "u_soft", self.alpha_out[0])
             set_u(self.alpha_prog, "u_mid", self.alpha_out[1])
             self.alpha_vao.render(vertices=3)
@@ -902,10 +918,8 @@ class Pipeline:
                     set_u(self.copy_prog, "u_tex", 0)
                     self.copy_vao.render(vertices=3)
                     sm = self.slot_masks[slot]
-                    if sm and sm.active:   # this source's own person mask, for its group's effects and Cut out
-                        sm.tex, sm.i, sm.fresh = self.refine_into(sm.raw, sm.refs, sm.i, sm.fresh, f.src.tex)
-                        self.grab_slot_small(sm, f.src.tex)
-                        sm.tex.use(3)
+                    # this source's own person mask, for its group's effects and Cut out (off: all "person")
+                    (sm.tex if sm and sm.active and sm.tex else self.full_mask).use(3)
                     res = self.run_chain(f.children, f.src.tex, f.ping, scale)
                     self.main_mask.use(3)
                     prog, vao = self.place_prog, self.place_vao
@@ -973,6 +987,11 @@ class Pipeline:
             set_u(f.prog, "u_masp", tuple(self.media_asp))
             set_u(f.prog, "u_mlive", tuple(self.media_live))
             set_u(f.prog, "u_plate_on", 1.0 if self.plate else 0.0)
+            if f.id.startswith("media_"):   # Show: Person only - its source's own mask
+                sm = self.slot_masks[f.opts[0]]
+                cut = f.opts[2] == 1 and sm is not None and sm.active and sm.tex is not None
+                (sm.tex if cut else self.blank).use(12)
+                set_u(f.prog, "u_cut_on", 1.0 if cut else 0.0)
             set_u(f.prog, "u_mix", fade * f.opacity)
             set_u(f.prog, "u_blend", 0 if lay else f.blend)
             # eraser/tracers work from the mask themselves; limiting them to subject/background would hide them
@@ -2408,7 +2427,7 @@ class App:
     # --- session: the current setup is saved continuously and restored on the next launch
     def session_data(self):
         p = self.pipe
-        return dict(version=2, band=self.band, gain=self.gain, hit_sens=self.audio.hit_sens, smooth=self.audio.smooth,
+        return dict(version=2, band=self.band, gain=self.gain, hit_sens=dict(self.audio.sens), smooth=self.audio.smooth,
                     current=self.current_preset,
                     audio_input=self.audio.device_name if self.audio.stream else None,
                     transition=p.transition, trans_time=p.trans_time, trans_unit=p.trans_unit, wave_rate=p.wave_rate,
@@ -2454,7 +2473,7 @@ class App:
         p.transition = data.get("transition", p.transition)
         p.trans_time, p.wave_rate = data.get("trans_time", p.trans_time), data.get("wave_rate", p.wave_rate)
         p.trans_unit = data.get("trans_unit", p.trans_unit)
-        self.audio.hit_sens = float(data.get("hit_sens", self.audio.hit_sens))
+        self.audio.set_sens(data.get("hit_sens", self.audio.sens))
         self.audio.smooth = float(data.get("smooth", self.audio.smooth))
         tm = data.get("tempo", {})
         self.tempo.bpm = tm.get("bpm", self.tempo.bpm)
@@ -2576,6 +2595,9 @@ class App:
             if isinstance(g, Group) and g.source >= 0 and g.on and not g.removing and (
                     g.cutout or any(not isinstance(c, Group) and c.on and uses(c) for c in walk(g.children))):
                 need.add(g.source)
+            elif not isinstance(g, Group) and g.id.startswith("media_") and g.on and not g.removing and g.opts[2] == 1:
+                need.add(g.opts[0])   # a Media Layer showing only the person from its source
+        need -= {slot for slot in range(3) if self.extra_desc[slot].get("mask") == "off"}   # Person mask: Off
         p = self.pipe
         for slot in range(3):
             sm = p.slot_masks[slot]
@@ -2598,8 +2620,10 @@ class App:
                 sm.ready = None
 
     def update_segmenter(self):
-        """Start the person segmenter when an effect needs it; bring in its newest mask."""
-        self.pipe.mask_active = self.mask_needed()
+        """Start the person segmenter when an effect needs it (unless the main source's Person mask is Off);
+        bring in its newest mask."""
+        self.pipe.mask_off = self.source_desc.get("mask") == "off"
+        self.pipe.mask_active = not self.pipe.mask_off and self.mask_needed()
         if not self.pipe.mask_active:
             return None
         if self.segmenter is None:

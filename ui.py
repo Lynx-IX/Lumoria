@@ -1610,7 +1610,7 @@ def top_bar(app):
     imgui.set_cursor_pos_y(sc(12))
     if neon_button(f"{fa.ICON_FA_GEAR}  Settings##settingsbtn", DIM, V(0, 0), S.settings_open,
                    None if S.settings_open else
-                   "AI mask, tempo, transitions, output, MIDI, interface (theme, lights, layout)", flat=True):
+                   "Person detection, tempo, transitions, output, MIDI, interface (theme, lights, layout)", flat=True):
         S.settings_open = S.settings_focus = not S.settings_open
     S.settings_btn = (imgui.get_item_rect_min(), imgui.get_item_rect_max())
     left_end = imgui.get_item_rect_max().x - imgui.get_window_pos().x
@@ -1838,7 +1838,7 @@ def sidebar(app):
 
 def settings_list(app):
     """The Settings tab's cards (the Settings panel in the Custom layout)."""
-    return [("AI Mask", fa.ICON_FA_USER, lambda: mask_section(app)),
+    return [("Person detection", fa.ICON_FA_USER, lambda: mask_section(app)),
             ("Tempo", fa.ICON_FA_DRUM, lambda: tempo_section(app)),
             ("Transitions", fa.ICON_FA_WAND_MAGIC_SPARKLES, lambda: transitions_section(app)),
             ("Output", fa.ICON_FA_TV, lambda: output_section(app)),
@@ -2095,7 +2095,8 @@ def source_picker(app, target, desc, src):
     extras), with a crop button beside it."""
     kind = desc.get("kind", "none")
     croppable = src is not None and kind not in ("none", "test")
-    imgui.set_next_item_width(-sc(34) if croppable else -1)
+    maskable = kind != "none"
+    imgui.set_next_item_width(-(sc(34) if croppable else 0) - (sc(32) if maskable else 0) or -1)
     if imgui.begin_combo(f"##src{target}", f"{KIND_ICONS.get(kind, '')}   {describe(desc)}"):
         if target != "main" and imgui.selectable(f"{fa.ICON_FA_CIRCLE_XMARK}   None", kind == "none")[0]:
             app.choose_source(target, {"kind": "none"})
@@ -2128,6 +2129,9 @@ def source_picker(app, target, desc, src):
                             imgui.SelectableFlags_.no_auto_close_popups)[0]:
             app.cameras, app.audio_devs, app.screens = list_cameras(), list_inputs(), list_screens()
         imgui.end_combo()
+    if maskable:
+        imgui.same_line(0, sc(4))
+        person_mask_button(app, target, desc)
     if croppable:
         imgui.same_line(0, sc(4))
         cropped = bool(desc.get("crop"))
@@ -2156,6 +2160,38 @@ def source_picker(app, target, desc, src):
         imgui.dummy(V(sc(LABEL_W) - 8, 0))
         imgui.same_line()
         imgui.text_colored(DIM, f"receiving {src.fps:.0f} fps")
+
+
+def person_mask_running(app, target):
+    """This source's person mask is working right now."""
+    if target == "main":
+        return app.pipe.mask_active
+    sm = app.pipe.slot_masks[target]
+    return bool(sm and sm.active)
+
+
+def person_mask_button(app, target, desc):
+    """A source's Person mask: Auto (the AI finds the person whenever something needs it; lit while it runs) or
+    Off (never: anything that asks treats the whole picture as the person). Kept in the source's description."""
+    off = desc.get("mask") == "off"
+    running = not off and person_mask_running(app, target)
+    name = "the main source" if target == "main" else f"Source {target + 2}"
+    if off:
+        tip = (f"Person mask: Off for {name}.\nNothing looks for a person in it: effects that use the mask (Background,\n"
+               "Apply to, person outlines, Cut out / Person only) treat the whole picture as the person.\nClick for Auto")
+    else:
+        tip = (f"Person mask: Auto for {name} - " + ("running now" if running else "idle, nothing needs it yet") +
+               ".\nThe AI finds the person whenever an effect needs it (lit while it runs).\n"
+               "Click for Off (saves GPU, e.g. for a screen or a game with nobody in it)")
+    if icon_button(fa.ICON_FA_USER_SLASH if off else fa.ICON_FA_USER, f"pmask{target}",
+                   AMBER if off else (CYAN if running else alpha(DIM, .7)), tip):
+        if off:
+            desc.pop("mask", None)
+        else:
+            desc["mask"] = "off"
+    if running:
+        mn, mx = imgui.get_item_rect_min(), imgui.get_item_rect_max()
+        led(imgui.get_window_draw_list(), V(mx.x - 5, mn.y + 5), CYAN, True, 2.2)
 
 
 def input_section(app):
@@ -2212,12 +2248,23 @@ def audio_section(app, meters=True):
     if imgui.is_item_hovered():
         imgui.set_tooltip("How gradually audio-driven effects rise and fall" + chr(10) +
                           "0 = Snappy (quick, percussive)   1 = slow and flowing (good for ambient music)")
-    label("Hit sensitivity")
-    _, app.audio.hit_sens = slider_float("##hitsens", app.audio.hit_sens, 0.0, 1.0, "%.2f")
-    if imgui.is_item_hovered():
-        imgui.set_tooltip("How easily a drum counts as a hit: low = only the clearest hits, high = every little one")
+    hit_sensitivity(app)
     if meters:
         audio_meters(app)
+
+
+def hit_sensitivity(app):
+    """How easily each drum counts as a hit, one slider per drum (raising the hats leaves the kick as it was)."""
+    sens = app.audio.sens
+    for key, name, tip in (("kick", "Kick", "the low thump. Raise it if soft kicks are missed; lower it if a bassline sets it off"),
+                           ("snare", "Snare", "the snare or clap's crack. Lower it if kicks or hats set it off"),
+                           ("hat", "Hats", "the hi-hats and cymbals. Raise it if quiet hats are missed")):
+        label(f"{'Hat' if key == 'hat' else name} hits")
+        _, sens[key] = slider_float(f"##sens{key}", sens[key], 0.0, 1.0, "%.2f")
+        if imgui.is_item_hovered():
+            imgui.set_tooltip(f"{name} sensitivity: {tip}.\n"
+                              "Low = only the clearest hits, high = every little one. Each drum is set on its own;\n"
+                              "watch the hit lights below while you set it")
 
 
 def audio_meters(app):
@@ -3635,7 +3682,8 @@ def custom_colours(f, j):
 
 
 def mask_section(app):
-    """Settings for the AI person mask shared by Background Eraser, Tracers, person outlines and Apply to."""
+    """Person detection: how the AI person mask is made (for every source that uses one): quality, edge, stability,
+    the captured background. Each source's own on / off is its Person mask switch in the Input card."""
     p = app.pipe
     label("Quality")
     q = segmented("mq", [name for name, _w, _r in SEG_QUALITY], app.mask_quality, MAGENTA)
@@ -3655,8 +3703,10 @@ def mask_section(app):
     _, S.show_mask = imgui.checkbox("Show mask on preview", S.show_mask)
     plate_controls(app)
     seg = app.segmenter
-    if not p.mask_active:
-        imgui.text_colored(DIM, "Off until an effect needs it (Eraser, Tracers,\nperson outline, Apply to).")
+    if p.mask_off:
+        imgui.text_colored(AMBER, "Off for the main source (its person button in the Input card).")
+    elif not p.mask_active:
+        imgui.text_colored(DIM, "Off until an effect needs it (Background, Tracers,\nperson outline, Apply to).")
     elif seg and seg.error:
         imgui.text_colored(RED, seg.error)
     elif seg and seg.loaded:
@@ -3689,7 +3739,7 @@ def plate_controls(app):
                           "The mask then also uses what changed against it: held objects,\n"
                           "hair and fingers come through better. Keep the camera still and\n"
                           "turn off auto exposure / white balance if you can.\n"
-                          "Also lets Background Eraser make you Invisible.")
+                          "Also lets the Background effect make you Invisible.")
     if p.plate:
         imgui.same_line()
         if icon_button(fa.ICON_FA_XMARK, "plateoff", RED, tip="Forget the captured background"):

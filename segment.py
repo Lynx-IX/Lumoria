@@ -11,6 +11,10 @@ import numpy as np
 MODEL = "rvm_mobilenetv3_fp32.onnx"
 # AI Mask quality: (label, input long side in px, internal downsample ratio)
 QUALITY = [("Fast", 512, 0.5), ("Balanced", 640, 0.5), ("High", 960, 0.5), ("Max", 1280, 0.375)]
+# Every segmenter (the main source's and one per Source 2-4) shares the graphics card through DirectML, and two
+# of them building or running a model at the same moment from different threads crashes the whole program. So
+# they take turns: one model call at a time (each takes a few ms, so several sources still keep up).
+GPU_TURN = threading.Lock()
 
 
 class Segmenter:
@@ -73,7 +77,8 @@ class Segmenter:
         opts.add_session_config_entry("session.intra_op.allow_spinning", "0")
         opts.add_session_config_entry("session.inter_op.allow_spinning", "0")
         providers = (["DmlExecutionProvider"] if gpu else []) + ["CPUExecutionProvider"]
-        return ort.InferenceSession(self.model_path, sess_options=opts, providers=providers)
+        with GPU_TURN:
+            return ort.InferenceSession(self.model_path, sess_options=opts, providers=providers)
 
     def _run(self):
         try:
@@ -99,8 +104,9 @@ class Segmenter:
             t0 = time.perf_counter()
             try:
                 src = (frame.astype(np.float32) / 255.0).transpose(2, 0, 1)[None]
-                out = session.run(None, {"src": src, "r1i": rec[0], "r2i": rec[1], "r3i": rec[2],
-                                         "r4i": rec[3], "downsample_ratio": np.array([ratio], np.float32)})
+                with GPU_TURN:
+                    out = session.run(None, {"src": src, "r1i": rec[0], "r2i": rec[1], "r3i": rec[2],
+                                             "r4i": rec[3], "downsample_ratio": np.array([ratio], np.float32)})
                 rec = out[2:]
                 mask = (np.clip(out[1][0, 0], 0, 1) * 255).astype(np.uint8)
                 in_a_row = 0

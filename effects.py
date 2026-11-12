@@ -329,6 +329,8 @@ _CAT = {
 # Media Layer: puts Source 2/3/4 into the chain as a box (fill / fit / stretch), placed with the centre,
 # sized by the amount, with rotation, rounded corners and a neon border.
 MEDIA_LAYER = """
+uniform sampler2D u_cut;   // Show: Person only - that source's own person mask, in the source's picture space
+uniform float u_cut_on;
 float sdRoundBox(vec2 p, vec2 b, float r){ vec2 q = abs(p) - b + r;
   return length(max(q, 0.)) + min(max(q.x, q.y), 0.) - r; }
 void main(){
@@ -349,8 +351,9 @@ void main(){
   float sd = sdRoundBox(p, hb, u_p1*min(hb.x, hb.y));
   float px = 1.5/u_res.y;
   float inside = smoothstep(px, -px, sd) * live;
+  inside *= mix(1., smoothstep(.3, .7, texture(u_cut, clamp(q, 0., 1.)).r), u_cut_on);
   vec3 col = mix(base, media(s, clamp(q, 0., 1.)), inside);
-  float glow = u_p2 * live * (smoothstep(.006 + .02*u_p2, 0., abs(sd)) * .9 + smoothstep(.06, 0., max(sd, 0.)) * .25);
+  float glow = (1. - u_cut_on) * u_p2 * live * (smoothstep(.006 + .02*u_p2, 0., abs(sd)) * .9 + smoothstep(.06, 0., max(sd, 0.)) * .25);
   o = vec4(col + vec3(0., .94, 1.)*glow, 1.); }"""
 
 # A group that starts from one source (Source 2-4): its effects ran on that video alone (u_s0, the source stretched
@@ -398,7 +401,8 @@ def _media(letter, default_source):
     return dict(id=f"media_{letter.lower()}", name=f"Media Layer {letter}", amt=.35, amt_label="Size", center=True,
                 params=[("Rotate", 0., -180., 180., "%.0f deg"), ("Rounded", 0.), ("Neon border", 0.)],
                 options=[("Source", ["Source 2", "Source 3", "Source 4"], default_source),
-                         ("Fit", ["Fill frame", "Fit inside", "Stretch"], 1)],
+                         ("Fit", ["Fill frame", "Fit inside", "Stretch"], 1),
+                         ("Show", ["Whole picture", "Person only (AI)"], 0)],
                 code=MEDIA_LAYER)
 
 # Neon Edges passes. Detail = less pre-blur (more fine edges, more noise); Threshold = how strong an edge
@@ -560,7 +564,7 @@ EFFECTS = [
     _media("A", 0), _media("B", 1), _media("C", 2),
 
     # ---- Cutout: AI person matte. Subject and background can each be the effected or clean image.
-    dict(id="cutout", name="Background Eraser", amt=1., mask=True, first=True,
+    dict(id="cutout", name="Background", amt=1., mask=True, first=True,
          params=[("Edge", .5), ("Shrink / grow", 0., -1., 1.)],
          options=[("Background", ["Black", "Green screen", "Blue screen", "Blur", "Clean feed",
                                   "With effects", "White", "Transparent (Spout)"], 0),

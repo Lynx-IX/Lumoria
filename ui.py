@@ -1848,16 +1848,17 @@ def draw_cards(app, entries):
     def flush():
         if not run:
             return
-        if cols == 1:
+        n = min(cols, len(run))   # fewer open cards than fit side by side: they share the width (one fills it)
+        if n == 1:
             for f, container, key in run:
                 effect_card(app, f, key, container)
-        else:   # card k goes in column k % cols, so each column stacks its own cards
+        else:   # card k goes in column k % n, so each column stacks its own cards
             imgui.push_style_var(imgui.StyleVar_.cell_padding, V(4, 4))
-            if imgui.begin_table(f"open{run[0][0].uid}", cols,
+            if imgui.begin_table(f"open{run[0][0].uid}", n,
                                  imgui.TableFlags_.sizing_stretch_same | imgui.TableFlags_.no_pad_outer_x):
-                for c in range(cols):
+                for c in range(n):
                     imgui.table_next_column()
-                    for f, container, key in run[c::cols]:
+                    for f, container, key in run[c::n]:
                         effect_card(app, f, key, container)
                 imgui.end_table()
             imgui.pop_style_var()

@@ -248,7 +248,7 @@ tab); *Make a timeline* gives it one, 8 bars long.
   in the look on air, starting where the slider is now (making the look a timeline if it had none), and opens the
   timeline on it. A slider with a wave also offers **Add depth lane**; one that has a lane offers to open it.
 - **Lanes:** *+ Lane* picks an effect in the look and one of its sliders (the same ones its card can automate).
-  Click a lane to add a point, drag a point to move it (it snaps to the *Grid*; hold Shift to place it freely),
+  Click a lane to add a point, drag a point to move it (it snaps to the *Grid*, drawn as lines across the lanes - bars strongest, then beats, then the finer grid; hold Shift to place it freely),
   right-click a point to choose how it gets to the next one, or to delete it. The shapes (each with a little picture
   in the menu): *Ramp* (a straight line), *Ease* (smooth in and out), *Ease in* (starts slow), *Ease out* (slows
   down), *Swell* (exponential: hardly moves, then rushes in), *Attack* (fast, then settles), *Bounce* (lands and

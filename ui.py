@@ -4935,18 +4935,17 @@ def timeline_body(app, ed):
                 dl.add_rect_filled(V(x_of(lo_), p0.y), V(x_of(hi_), bot), u32(alpha(col, .10)))
     # ruler: bars (or seconds) with beat ticks, labels as often as there's room
     dl.add_rect_filled(V(gx0, p0.y), V(gx1, top), u32(LCD_BG), 3)
-    beats = 4 if tl.get("unit", "bars") == "bars" else 1
     ppu = gw / span
     step = 1 if ppu >= 30 else 2 if ppu >= 15 else 4 if ppu >= 8 else 8
+    lines = grid_lines(tl, start, span, ppu)
+    ed["grid_lines"] = lines   # the lanes draw the same lines across themselves
+    for pos, level in lines:   # ticks on the ruler: bars long, beats shorter, the finer grid short
+        x = x_of(pos)
+        dl.add_line(V(x, top - (10 if level == 0 else 6 if level == 1 else 3)), V(x, top),
+                    u32(alpha(LCD, .55 if level == 0 else .35 if level == 1 else .22)), 1)
     for i in range(int(math.floor(start)), int(math.ceil(start + span)) + 1):
-        x = x_of(i)
-        dl.add_line(V(x, top - (10 if i % step == 0 else 5)), V(x, bot), u32(alpha(BORDER, .9 if i % 4 == 0 else .5)), 1)
-        if i % step == 0 and i < length:
-            dl.add_text(S.mono, 13 * S.scale, V(x + 4, p0.y + 4), u32(alpha(LCD, .8)), f"{i + 1}")
-        if beats > 1 and i < length and ppu > 40:
-            for k in range(1, beats):
-                xb = x_of(i + k / beats)
-                dl.add_line(V(xb, top - 3), V(xb, top), u32(alpha(LCD, .3)), 1)
+        if i % step == 0 and 0 <= i < length:
+            dl.add_text(S.mono, 13 * S.scale, V(x_of(i) + 4, p0.y + 4), u32(alpha(LCD, .8)), f"{i + 1}")
     dl.pop_clip_rect()
     # markers on the ruler: drag to move
     imgui.set_cursor_screen_pos(V(gx0, p0.y))
@@ -5054,6 +5053,30 @@ def timeline_body(app, ed):
     imgui.end_child()
 
 
+def grid_lines(tl, start, span, ppu):
+    """[(position, level)] of the grid lines in view: level 0 a bar (or every 4 s), 1 a beat (a second), 2 the finer
+    grid. The Grid setting's own lines show while they're at least a few pixels apart; zoomed further out, only the
+    beats, then only the bars (every 2nd, 4th... when even those crowd)."""
+    bars = tl.get("unit", "bars") == "bars"
+    grid = tl.get("grid", 0.25)
+    beat = 0.25 if bars else 1.0
+    big = 1.0 if bars else 4.0
+    gap = sc(6)
+    step = grid if grid * ppu >= gap else beat if beat * ppu >= gap and beat > grid else big
+    while step * ppu < gap:
+        step *= 2
+    out = []
+    k = math.floor(start / step)
+    end = min(start + span, tl["length"])
+    while k * step <= end + 1e-9:
+        pos = k * step
+        if pos >= 0:
+            whole = lambda unit: abs(pos / unit - round(pos / unit)) < 1e-6
+            out.append((pos, 0 if whole(big) else 1 if whole(beat) else 2))
+        k += 1
+    return out
+
+
 def timeline_lane(app, ed, lane, li, rect, lo, hi, fmt, x_of, pos_of, snap, dl):
     """One lane's graph: its line, its points, and the mouse on them. Click: add a point (or grab one), Ctrl+click:
     select points, Ctrl+drag: select with a box, right-click a point: its menu."""
@@ -5064,6 +5087,12 @@ def timeline_lane(app, ed, lane, li, rect, lo, hi, fmt, x_of, pos_of, snap, dl):
     y_of = lambda v: y1 - pad - (y1 - y0 - 2 * pad) * (min(hi, max(lo, v)) - lo) / max(1e-9, hi - lo)
     v_of = lambda y: lo + (hi - lo) * min(1.0, max(0.0, (y1 - pad - y) / max(1.0, y1 - y0 - 2 * pad)))
     dl.add_rect_filled(V(gx0, y0), V(gx1, y1), u32(alpha(FRAME, .85)), 3)
+    dl.push_clip_rect(V(gx0, y0), V(gx1, y1), True)
+    for pos, level in ed.get("grid_lines", []):   # the grid, right across the lane: points snap to these lines
+        x = x_of(pos)
+        dl.add_line(V(x, y0), V(x, y1), u32(alpha(EDGE_HI, .75) if level == 0 else
+                                           alpha(BORDER, .85) if level == 1 else alpha(BORDER, .4)), 1)
+    dl.pop_clip_rect()
     imgui.set_cursor_screen_pos(V(gx0, y0))
     imgui.invisible_button("##graph", V(max(1.0, gx1 - gx0), y1 - y0),
                            imgui.ButtonFlags_.mouse_button_left | imgui.ButtonFlags_.mouse_button_right)

@@ -20,6 +20,12 @@ a test copy before anything lands on main.
 - Step 4 (merge) done: the look editor window has two tabs, *Transition & stay* (the old Transition popup,
   `look_meta_body`) and *Timeline*; a timeline look's Stay is its loop-pass count (`loops`); auto-play's "every" is a
   small button with its value on the playlist bar (a popup), so the bar is shorter.
+- Step 5 (depth and takeover) done: a lane is *value* or *depth* (switch in the editor, points convert between the
+  slider's range and 0..1); depth scales the slider's wave around its middle in `App.automate`. Moving a value-lane
+  slider by hand (card: `S.grabbed` from the slider wrapper; MIDI: `handle_midi`) holds the lane off until its next
+  point or the section's end (`Playhead.hold_until`, `App.lane_hold`). The card's Automate button shows a violet
+  timeline mark for a value lane, a violet wave for a depth lane. `App.timeline_name` keeps the playing look known
+  after a MIDI tweak clears the current look.
 
 ## The idea in one paragraph
 

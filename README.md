@@ -246,7 +246,12 @@ tab); *Make a timeline* gives it one, 8 bars long.
   Click a lane to add a point, drag a point to move it (it snaps to the *Grid*; hold Shift to place it freely),
   right-click a point to choose how it gets to the next one - *Ramp* (a straight line), *Ease* (smooth in and out)
   or *Hold, then jump* - or to delete it. The eye mutes a lane, × removes it. A slider with a lane follows the lane,
-  not its wave.
+  not its wave; its Automate button turns into a violet timeline mark.
+- **Value or depth:** the button left of the eye switches a lane between *value* (it sets the slider) and *depth* (it
+  sets how far the slider's wave swings, 1 = its whole From-To range, 0 = still in the middle) - e.g. a wave that's
+  subtle in the intro and wide by the drop. A depth lane needs a wave on the slider (its Automate button).
+- **Taking over:** grab a slider that a lane moves - on its card, or with its MIDI control - and it's yours until the
+  lane's next point (or the end of the section playing), then the lane takes it back.
 - **Intro / loop / outro:** drag the two markers on the ruler. The intro plays once when the look comes on, the loop
   repeats while it stays on, and the outro plays when it leaves. *Whole loop* (no markers) just repeats.
 - **Leaving:** Take, a tile click, previous / next, MIDI and auto-play all wait for the outro. *On leave: Finish the

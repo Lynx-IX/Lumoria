@@ -1241,6 +1241,9 @@ class App:
         self.lane_keys = set()       # (effect id, key) its lanes move: their waves wait meanwhile
         self.leaving = None          # {name, next_at}: the look on air is playing its outro, then `name` comes in
         self.out_playhead = None     # (playhead, effects) of a look fading out while it plays its outro
+        self.timeline_name = None    # the look whose timeline is playing (still known after a MIDI tweak)
+        self.depth_keys = set()      # (effect id, key) whose wave's swing a depth lane sets
+        self.lane_hold = {}          # (effect id, key) -> elapsed time until its lane takes the slider back
         # cue and crossfader: a look lined up without firing, then Taken (on the launch beat / bar / phrase) or
         # faded in by hand. The fader's direction flips each time it brings a look fully in, like A / B decks.
         self.cued = None
@@ -1835,6 +1838,8 @@ class App:
                     put(not get())
             elif ctl == "trigger" and pressed:
                 put()
+            if tuple(m["target"]) in self.lane_keys:   # a slider the look's timeline moves: yours for now
+                self.lane_takeover(m["target"][0], m["target"][1], t)
             if m["target"][0] not in ("app", "look"):
                 self.current_preset = None
 
@@ -2185,7 +2190,7 @@ class App:
         launch boundary when launch quantize is on, and `name` starts coming in so that its transition overlaps
         the outro's end. Returns False when there's no outro to play (the look loads the usual way)."""
         ph = self.playhead
-        if ph is None or name == self.current_preset or not ph.has_outro():
+        if ph is None or name in (self.current_preset, self.timeline_name) or not ph.has_outro():
             return False
         if self.leaving:   # already on its way out: just change where it's going
             self.leaving["name"] = name
@@ -2247,15 +2252,32 @@ class App:
             self.crossfade_look(data, style, secs)
         self.current_preset = name
         self.preset_t = glfw.get_time()
-        self.start_timeline(data.get("timeline"))
+        self.start_timeline(data.get("timeline"), name)
 
-    def start_timeline(self, tl):
+    def start_timeline(self, tl, name=None):
         """The look now on air brings its timeline (or none): it starts from the top, on the tempo clock."""
+        self.timeline_name = (name or self.current_preset) if tl else None
+        self.lane_hold = {}
         self.timeline = tl or None
         self.playhead = (timeline.Playhead(tl, self.tempo.phase, glfw.get_time(), self.tempo.beats_per_bar)
                          if tl and tl.get("lanes") is not None else None)
-        self.lane_keys = {(ln["effect"], ln["key"]) for ln in tl.get("lanes", [])
-                          if ln.get("mode", "value") == "value" and not ln.get("mute")} if tl else set()
+        self.set_lane_keys(tl)
+
+    def set_lane_keys(self, tl):
+        lanes = [ln for ln in (tl or {}).get("lanes", []) if not ln.get("mute")]
+        self.lane_keys = {(ln["effect"], ln["key"]) for ln in lanes if ln.get("mode", "value") == "value"}
+        self.depth_keys = {(ln["effect"], ln["key"]) for ln in lanes if ln.get("mode") == "depth"}
+
+    def lane_takeover(self, eid, key, t):
+        """A slider a value lane moves was moved by hand (MIDI or its card): it's yours until the lane's next point."""
+        if self.playhead is not None and (eid, key) in self.lane_keys:
+            self.lane_hold[(eid, key)] = self.playhead.hold_until(eid, key, self.tempo.phase, t)
+
+    def lane_held(self, eid, key, t):
+        """This slider's lane is letting go of it for now (someone took it over)."""
+        until = self.lane_hold.get((eid, key))
+        return until is not None and self.playhead is not None and \
+            self.playhead.elapsed(self.tempo.phase, t) < until
 
     def edit_timeline(self, name, tl):
         """The timeline editor changed look `name`'s timeline (None: removed it). Keep it in the look file; if the
@@ -2273,23 +2295,23 @@ class App:
             save_json(path, data)
         except (OSError, ValueError):
             self.flash(f"Couldn't save the timeline of '{name}'", 4)
-        if name != self.current_preset:
+        if name not in (self.current_preset, self.timeline_name):
             return
         self.timeline = tl or None
         if not tl:
-            self.playhead, self.lane_keys = None, set()
+            self.playhead, self.timeline_name = None, None
+            self.set_lane_keys(None)
             return
         if self.playhead is None:
-            self.start_timeline(tl)
+            self.start_timeline(tl, name)
             return
         self.playhead.tl = tl
-        self.lane_keys = {(ln["effect"], ln["key"]) for ln in tl.get("lanes", [])
-                          if ln.get("mode", "value") == "value" and not ln.get("mute")}
+        self.set_lane_keys(tl)
 
     def look_timeline(self, name):
         """(a look's timeline or None, its effect ids in chain order) - from the effects on air for the look on air,
         else from its file."""
-        if name == self.current_preset:
+        if name in (self.current_preset, self.timeline_name):
             return self.timeline, [f.id for f in walk(self.pipe.order) if not isinstance(f, Group) and not f.removing]
         try:
             with open(os.path.join(PRESET_DIR, name + ".json")) as fh:
@@ -2314,11 +2336,11 @@ class App:
         else:
             self.out_playhead = None
         if self.playhead is not None:
-            self.apply_lanes(self.playhead, self.pipe.order, t)
+            self.apply_lanes(self.playhead, self.pipe.order, t, getattr(self, "lane_hold", None))
 
-    def apply_lanes(self, ph, order, t):
+    def apply_lanes(self, ph, order, t, holds=None):
         ph.beats_per_bar = self.tempo.beats_per_bar
-        vals = ph.values(self.tempo.phase, t)
+        vals = ph.values(self.tempo.phase, t, holds=holds)
         if not vals:
             return
         for f in walk(order):
@@ -2455,6 +2477,15 @@ class App:
 
     def automate(self, t):
         tp = self.tempo
+        ph = getattr(self, "playhead", None)
+        depth = ph.values(tp.phase, t, mode="depth") if ph is not None else {}
+
+        def swing(f, key, v, lo, hi):   # a depth lane: 1 = the full From-To range, 0 = held in its middle
+            d = depth.get((f.id, key))
+            if d is None:
+                return v
+            mid = (lo + hi) / 2
+            return mid + (v - mid) * max(0.0, d)
         rnd = lambda i, seed: (math.sin(i * 12.9898 + seed * 78.233) * 43758.5453) % 1.0
         for f in walk(self.pipe.order):
             if isinstance(f, Group) or not f.autos or f.morph:
@@ -2512,13 +2543,13 @@ class App:
                         s2 = self.THEN_SHAPES[min(then, len(self.THEN_SHAPES) - 1)]
                         w2 = (c2 % 1.0) if s2 == 8 else self.wave(s2, c2, seed + 7)
                         v = a["hi"] + (a.get("then_to", a["hi"]) - a["hi"]) * w2
-                        self.set_auto_value(f, key, v)
+                        self.set_auto_value(f, key, swing(f, key, v, a["hi"], a.get("then_to", a["hi"])))
                         continue
                     e = a.get("ease", 0)
                     w = u * u * (3 - 2 * u) if e == 0 else 1 - (1 - u) ** 3 if e == 1 else u ** 3 if e == 2 else u
                 else:
                     w = self.audio_drive(f, key, a, t)
-                self.set_auto_value(f, key, a["lo"] + (a["hi"] - a["lo"]) * w)
+                self.set_auto_value(f, key, swing(f, key, a["lo"] + (a["hi"] - a["lo"]) * w, a["lo"], a["hi"]))
 
     @staticmethod
     def set_auto_value(f, key, v):

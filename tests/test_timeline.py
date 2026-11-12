@@ -117,7 +117,8 @@ class AppLanes(unittest.TestCase):
         fake = types.SimpleNamespace(tempo=types.SimpleNamespace(phase=0.0, beats_per_bar=4),
                                      pipe=types.SimpleNamespace(order=[fx, other], outgoing=None),
                                      set_auto_value=app.App.set_auto_value, out_playhead=None)
-        fake.apply_lanes = lambda ph, order, t: app.App.apply_lanes(fake, ph, order, t)
+        fake.apply_lanes = lambda ph, order, t, holds=None: app.App.apply_lanes(fake, ph, order, t, holds)
+        fake.lane_hold = {}
         lanes = [dict(effect="kaleido", key="amt", mode="value", mute=False, points=[[0, 0.0, "ramp"], [1, 1.0, "ramp"]]),
                  dict(effect="kaleido", key="p1", mode="value", mute=False, points=[[0, 0.7, "hold"]])]
         fake.playhead = T.Playhead(tl(length=4.0, lanes=lanes), beat=0.0, t=0.0)
@@ -200,7 +201,7 @@ class Handover(unittest.TestCase):
         fake.pipe = types.SimpleNamespace(order=[fx], outgoing=None, transition=transition, trans_secs=secs)
         fake.meta = lambda name: dict(transition=-1, fade=1.0, fade_unit=0, hold=0, unit=0)
         fake.hold_time = lambda: (fake.auto_every, fake.auto_unit)
-        fake.out_playhead = None
+        fake.out_playhead, fake.timeline_name, fake.lane_hold = None, "A", {}
         fake.playhead = T.Playhead(song(on_leave=on_leave, lanes=lanes), beat=0.0, t=0.0)
         fake.fx = fx
 
@@ -278,6 +279,66 @@ class Handover(unittest.TestCase):
         f.auto_mode, f.auto_every, f.auto_unit = 1, 16, 2   # every 16 bars = two 8-bar passes
         self.run_to(f, 40 * 4)
         self.assertEqual(f.fired[0], ("B", 24 * 4))   # intro 4 + 2 passes (16) = bar 20, + the 4-bar outro = bar 24
+
+
+class DepthAndTakeover(unittest.TestCase):
+    def lanes(self):
+        return [dict(effect="kaleido", key="amt", mode="value", mute=False,
+                     points=[[0, 0.0, "ramp"], [2, 1.0, "ramp"], [4, 0.0, "ramp"]]),
+                dict(effect="kaleido", key="p0", mode="depth", mute=False, points=[[0, 1.0, "ramp"], [4, 0.0, "ramp"]])]
+
+    def test_values_by_mode(self):
+        ph = T.Playhead(song(lanes=self.lanes()), beat=0.0, t=0.0)
+        self.assertEqual(ph.values(8.0, 0), {("kaleido", "amt"): 1.0})            # bar 2
+        self.assertEqual(ph.values(8.0, 0, mode="depth"), {("kaleido", "p0"): 0.5})
+
+    def test_hold_until_the_next_point_or_the_section_end(self):
+        ph = T.Playhead(song(lanes=self.lanes()), beat=0.0, t=0.0)
+        self.assertAlmostEqual(ph.hold_until("kaleido", "amt", 1 * 4, 0), 2.0)   # bar 1 (intro): the point at 2
+        self.assertAlmostEqual(ph.hold_until("kaleido", "amt", 2.5 * 4, 0), 4.0) # past it: the intro's end (4)
+        self.assertAlmostEqual(ph.hold_until("kaleido", "amt", 6 * 4, 0), 12.0)  # in the loop, no point ahead: its end
+        ph.outro_at = 12.0
+        self.assertEqual(ph.hold_until("kaleido", "amt", 13 * 4, 0), float("inf"))   # the outro: until the look changes
+        held = {("kaleido", "amt"): 2.0}
+        self.assertEqual(ph.values(1 * 4, 0, holds=held), {})                    # held: the lane lets go ...
+        self.assertEqual(ph.values(2 * 4, 0, holds=held), {("kaleido", "amt"): 1.0})   # ... and takes it back
+
+    def test_the_app_lets_go_when_taken_over(self):
+        import app
+        fx = types.SimpleNamespace(id="kaleido", removing=False, amt=0.3, amt_smooth=0.3, pvals=[0.0])
+        fake = types.SimpleNamespace(tempo=types.SimpleNamespace(phase=4.0, beats_per_bar=4),
+                                     pipe=types.SimpleNamespace(order=[fx], outgoing=None),
+                                     set_auto_value=app.App.set_auto_value, out_playhead=None, lane_hold={},
+                                     lane_keys={("kaleido", "amt")})
+        fake.apply_lanes = lambda ph, order, t, holds=None: app.App.apply_lanes(fake, ph, order, t, holds)
+        fake.playhead = T.Playhead(song(lanes=self.lanes()), beat=0.0, t=0.0)
+        app.App.lane_takeover(fake, "kaleido", "amt", 0.0)   # at bar 1: yours until the point at bar 2
+        fx.amt = 0.9                                          # (moved by hand)
+        app.App.timeline_step(fake, 0.0)
+        self.assertAlmostEqual(fx.amt, 0.9)
+        self.assertTrue(app.App.lane_held(fake, "kaleido", "amt", 0.0))
+        fake.tempo.phase = 2 * 4 + 2                          # bar 2.5: the lane has it again
+        app.App.timeline_step(fake, 0.0)
+        self.assertAlmostEqual(fx.amt, 0.75)
+        app.App.lane_takeover(fake, "kaleido", "p0", 0.0)    # not a value lane: nothing to take over
+        self.assertNotIn(("kaleido", "p0"), fake.lane_hold)
+
+    def test_depth_lane_scales_the_wave(self):
+        import app
+        fx = types.SimpleNamespace(id="kaleido", uid=1, removing=False, on=True, morph=None, intro_reset=False,
+                                   amt=0.0, amt_smooth=0.0, pvals=[0.0],
+                                   autos={"p0": dict(shape=2, rate=1.0, unit=0, lo=0.0, hi=1.0)})   # ramp up, 1 s
+        fake = types.SimpleNamespace(tempo=types.SimpleNamespace(phase=0.0, beats_per_bar=4), auto_state={},
+                                     pipe=types.SimpleNamespace(order=[fx]), set_auto_value=app.App.set_auto_value,
+                                     lane_keys=set(), audio_drive=None, centre_path=None)
+        fake.wave = app.App.wave
+        lanes = [dict(effect="kaleido", key="p0", mode="depth", mute=False, points=[[0, 0.5, "hold"]])]
+        fake.playhead = T.Playhead(song(lanes=lanes), beat=0.0, t=0.0)
+        app.App.automate(fake, 0.9)                     # the ramp is at 0.9 of its way
+        self.assertAlmostEqual(fx.pvals[0], 0.5 + (0.9 - 0.5) * 0.5)   # half the swing, around the middle
+        fake.playhead = None
+        app.App.automate(fake, 0.9)
+        self.assertAlmostEqual(fx.pvals[0], 0.9)        # no timeline: the full swing
 
 
 if __name__ == "__main__":

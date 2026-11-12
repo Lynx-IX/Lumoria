@@ -103,15 +103,34 @@ class Playhead:
         whole = math.floor(k + 1e-6)
         return e if abs(k - whole) < 1e-6 else a + math.ceil(k) * (b - a)
 
-    def values(self, beat, t):
-        """{(effect id, key): value} for every lane, at the current position."""
+    def values(self, beat, t, mode="value", holds=None):
+        """{(effect id, key): value} for every lane of that mode ("value": the slider's value, "depth": how far its
+        wave swings, 0..1) at the current position. A lane in `holds` ({key: elapsed time}) lets go of its slider
+        until then (someone took it over: see hold_until)."""
         pos, _, _ = self.where(beat, t)
+        e = self.elapsed(beat, t) if holds else 0.0
         out = {}
         for lane in self.tl.get("lanes", []):
+            key = (lane["effect"], lane["key"])
+            if lane.get("mode", "value") != mode or lane.get("mute") or (holds and e < holds.get(key, -1.0)):
+                continue
             v = value_at(lane["points"], pos)
-            if v is not None and lane.get("mode", "value") == "value" and not lane.get("mute"):
-                out[(lane["effect"], lane["key"])] = v
+            if v is not None:
+                out[key] = v
         return out
+
+    def hold_until(self, effect, key, beat, t):
+        """Someone moved this slider by hand (MIDI or its card): when its lane takes it back - at the lane's next
+        point, or where the section playing now ends (elapsed time; the outro keeps it until the look changes)."""
+        e = self.elapsed(beat, t)
+        pos, section, _ = self.where(beat, t)
+        a, b, length = sections(self.tl)
+        if section in ("outro", "done"):
+            return float("inf")
+        end = a if section == "intro" else b
+        lane = next((ln for ln in self.tl.get("lanes", []) if ln["effect"] == effect and ln["key"] == key), None)
+        ahead = [p[0] for p in (lane["points"] if lane else []) if pos + 1e-9 < p[0] <= end]
+        return e + ((min(ahead) if ahead else end) - pos)
 
 
 def plan_outro(ph, beat, t, jump=False, grid=0.0, bar_origin=0.0, overlap=0.0):

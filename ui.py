@@ -220,6 +220,7 @@ class _State:
     rd_zones, rd_stack, rd_rects, rd_prev_rects = [], [], {}, {}   # this frame's lists and items, for the next
     tl = None                      # the timeline editor: {name, tl, ids, drag, menu} for the look it's open on
     tl_focus = False
+    grabbed = None                 # the slider (its label) moved by hand this frame, for automation_menu
     flow_first = True              # Custom: the next flow() item starts the panel (no same_line before it)
 
 
@@ -584,6 +585,8 @@ def typeable(widget, default_fmt=None):
                 typed, v2 = imgui.input_float(f"##nb_{label_}", float(new), 0.0, 0.0, num_fmt, flags)
             if typed:
                 new, changed = type(value)(min(max(v2, min(lo, hi)), max(lo, hi))), True
+        if changed or imgui.is_item_active() or key in _typing:
+            S.grabbed = label_   # moved by hand this frame (automation_menu: a timeline lane lets go of it)
         return changed, new
     return wrapped
 
@@ -3270,6 +3273,10 @@ def automation_menu(app, f, key, lo, hi, name):
     """Right-click the slider just drawn: make it move on its own (an LFO timed by the tempo). An automated
     slider shows a wave mark beside it."""
     a = f.autos.get(key)
+    if S.grabbed == f"##{key}":   # moved by hand: a timeline lane on it lets go until its next point
+        S.grabbed = None
+        if (f.id, key) in app.lane_keys:
+            app.lane_takeover(f.id, key, glfw.get_time())
     if a and not S.auto_buttons:
         mn, mx = imgui.get_item_rect_min(), imgui.get_item_rect_max()
         heard = a["shape"] == 7
@@ -3396,6 +3403,15 @@ def auto_button(app, f, key, name):
         tip = (f"{name}: follows the music" if heard else f"{name}: moving on its own") + chr(10) + "Click to change it"
     else:
         tip = f"Automate {name}: make it move on its own" + chr(10) + "(an LFO in time with the tempo) or follow the music"
+    if (f.id, key) in app.lane_keys:   # the look's timeline moves this slider
+        held = app.lane_held(f.id, key, glfw.get_time())
+        icon, col = fa.ICON_FA_TIMELINE, alpha(VIOLET, .5) if held else VIOLET
+        tip = (f"{name}: you've taken it over from the look's timeline; its lane takes it back at its next point"
+               if held else f"{name}: moved by the look's timeline (a lane)") + \
+            chr(10) + "Grab the slider or its MIDI control to take it over until the lane's next point"
+    elif (f.id, key) in app.depth_keys:
+        col = VIOLET
+        tip += chr(10) + "The look's timeline sets how far it swings (a depth lane)"
     learning = app.midi_learn
     if learning:
         tip = f"MIDI learn: click, then press a button to pause / resume {name}'s automation"
@@ -4457,7 +4473,15 @@ def lane_sliders(f):
 
 
 def lane_info(app, lane):
-    """(effect name, slider name, lo, hi, format) for a lane; a lane whose effect isn't known keeps its points' range."""
+    """(effect name, slider name, lo, hi, format) for a lane; a lane whose effect isn't known keeps its points' range.
+    A depth lane runs 0..1: how far the slider's wave swings (1 = its full From-To range)."""
+    if lane.get("mode") == "depth":
+        ename, sname, *_ = slider_info(app, lane)
+        return ename, f"{sname}: wave depth", 0.0, 1.0, "%.2f"
+    return slider_info(app, lane)
+
+
+def slider_info(app, lane):
     f = effect_kind(app, lane["effect"])
     if f is not None:
         for key, name, lo, hi, fmt in lane_sliders(f):
@@ -4466,6 +4490,11 @@ def lane_info(app, lane):
                 return (f.spec["name"] + (f" {copy[1]}" if len(copy) > 1 else "")), name, lo, hi, fmt
     vals = [p[1] for p in lane["points"]] or [0.0, 1.0]
     return lane["effect"], lane["key"], min(vals), max(max(vals), min(vals) + 1e-3), "%.2f"
+
+
+def on_air(app, ed):
+    """The look the editor is open on is the one playing (its timeline, if it has one)."""
+    return ed["name"] in (app.current_preset, app.timeline_name)
 
 
 def tl_changed(app):
@@ -4586,7 +4615,7 @@ def timeline_header(app, ed):
         timeline_add_menu(app, ed)
         imgui.end_popup()
     # where it is, if this look is on air
-    if ed["name"] == app.current_preset and app.playhead is not None:
+    if on_air(app, ed) and app.playhead is not None:
         pos, section, n = app.playhead.where(app.tempo.phase, glfw.get_time())
         imgui.same_line(0, 18)
         imgui.text_colored(CYAN, f"{section}" + (f" {n + 1}" if section == "loop" else "") + f"   {pos:.2f} {u}")
@@ -4606,7 +4635,7 @@ def timeline_add_menu(app, ed):
                 if imgui.menu_item_simple(name, "", False, (eid, key) not in used):
                     # start it where the slider is now, if the effect is on air
                     live = next((x for x in walk_items(app.pipe.order) if getattr(x, "id", None) == eid
-                                 and not is_group(x)), None) if ed["name"] == app.current_preset else None
+                                 and not is_group(x)), None) if on_air(app, ed) else None
                     v = lane_current(live, key, lo, hi)
                     tl["lanes"].append(dict(effect=eid, key=key, mode="value", mute=False,
                                             points=[[0.0, v, "ramp"]]))
@@ -4686,8 +4715,26 @@ def timeline_body(app, ed):
         dl.add_rect_filled(V(p0.x, y0), V(gx0 - 6, y1), u32(CARD), 3)
         dl.add_text(V(p0.x + 8, y0 + 5), u32(TEXT if not lane.get("mute") else DIM), sname)
         dl.add_text(S.font, 13 * S.scale, V(p0.x + 8, y0 + 24), u32(DIM), ename)
-        imgui.set_cursor_screen_pos(V(gx0 - 6 - sc(56), y0 + 4))
+        if lane.get("mode") == "depth" and on_air(app, ed):
+            live = next((x for x in walk_items(app.pipe.order) if getattr(x, "id", None) == lane["effect"]
+                         and not is_group(x)), None)
+            if live is not None and lane["key"] not in live.autos:
+                dl.add_text(S.font, 12 * S.scale, V(p0.x + 8, y0 + 39), u32(AMBER), "no wave on it yet")
+        imgui.set_cursor_screen_pos(V(gx0 - 6 - sc(84), y0 + 4))
         imgui.push_id(f"lane{li}")
+        depth = lane.get("mode") == "depth"
+        if icon_button(fa.ICON_FA_WAVE_SQUARE if depth else fa.ICON_FA_SLIDERS, "mode", VIOLET if depth else alpha(DIM, .7),
+                       "Depth lane: sets how far the slider's wave swings (1 = its whole From-To range, 0 = still).\n"
+                       "Click for a value lane (the lane sets the slider itself)" if depth else
+                       "Value lane: sets the slider itself.\nClick for a depth lane: it sets how far the slider's "
+                       "wave swings instead\n(the slider needs a wave: its Automate button)", V(sc(26), 0)):
+            _e, _s, lo_, hi_, _f = slider_info(app, lane)
+            span = max(1e-9, hi_ - lo_)
+            for p in lane["points"]:   # keep the line's shape: map between the slider's range and 0..1
+                p[1] = lo_ + span * min(1.0, max(0.0, p[1])) if depth else min(1.0, max(0.0, (p[1] - lo_) / span))
+            lane["mode"] = "value" if depth else "depth"
+            tl_changed(app)
+        imgui.same_line(0, 2)
         if icon_button(fa.ICON_FA_EYE_SLASH if lane.get("mute") else fa.ICON_FA_EYE, "mute",
                        AMBER if lane.get("mute") else alpha(DIM, .7),
                        "Muted: this lane doesn't move its slider (click to use it again)" if lane.get("mute")
@@ -4702,7 +4749,7 @@ def timeline_body(app, ed):
     if not tl["lanes"]:
         dl.add_text(V(gx0 + 12, top + sc(20)), u32(DIM), "+ Lane above adds one: pick an effect, then the slider it moves.")
     # the playhead, if this look is on air
-    if ed["name"] == app.current_preset and app.playhead is not None:
+    if on_air(app, ed) and app.playhead is not None:
         pos, section, _n = app.playhead.where(app.tempo.phase, glfw.get_time())
         x = x_of(min(pos, length))
         dl.add_line(V(x, p0.y), V(x, bot), u32(WHITE if section != "outro" else MAGENTA), 2)

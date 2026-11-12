@@ -244,6 +244,9 @@ Cue next / previous; with Button lights on, Take lights up while something is cu
 A look can have a **timeline** that moves its sliders over time, in bars on the tempo clock (or seconds). Open it
 from a look tile's ▾ menu (or right-click) > **Timeline...** (the look's editor, beside its *Transition & stay*
 tab); *Make a timeline* gives it one, 8 bars long.
+- **From the slider itself:** right-click a slider (or click its Automate button) > **Add to timeline** gives it a lane
+  in the look on air, starting where the slider is now (making the look a timeline if it had none), and opens the
+  timeline on it. A slider with a wave also offers **Add depth lane**; one that has a lane offers to open it.
 - **Lanes:** *+ Lane* picks an effect in the look and one of its sliders (the same ones its card can automate).
   Click a lane to add a point, drag a point to move it (it snaps to the *Grid*; hold Shift to place it freely),
   right-click a point to choose how it gets to the next one - *Ramp* (a straight line), *Ease* (smooth in and out)

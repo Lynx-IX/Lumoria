@@ -3304,6 +3304,7 @@ def automation_menu(app, f, key, lo, hi, name):
         return
     bold(f"Automate: {name}", 15)
     imgui.separator()
+    slider_timeline_items(app, f, key, lo, hi, a)
     on = a is not None
     changed, on = imgui.checkbox("Float around on its own" if key == "centre" else "Move on its own", on)
     if changed:
@@ -4820,6 +4821,59 @@ def intro_lane(app, tl, eid, key, a):
     seg = "ramp" if a.get("ease", 0) == 3 else "ease"
     return dict(effect=eid, key=key, mode="value", mute=False,
                 points=[[0.0, a.get("lo", 0.0), seg], [dur, a.get("hi", 1.0), "hold"]])
+
+
+def slider_timeline_items(app, f, key, lo, hi, a):
+    """The top of a slider's automation menu: send it to the look's timeline (a lane for it, starting where the
+    slider is now), a depth lane for its wave, or open the lane it already has."""
+    if key == "centre" or not timeline.valid_key(key):
+        return
+    look = app.timeline_name or app.current_preset
+    if not look or look not in app.playlist:
+        imgui.text_colored(DIM, f"{fa.ICON_FA_TIMELINE}  Timeline: save this as a look (or fire one) first")
+        imgui.separator()
+        return
+    lanes = (app.timeline or {}).get("lanes", [])
+    has = {ln.get("mode", "value") for ln in lanes if ln["effect"] == f.id and ln["key"] == key}
+    if "value" in has:
+        if imgui.menu_item_simple(f"{fa.ICON_FA_TIMELINE}   Open its lane in the timeline"):
+            send_to_timeline(app, look, f, key, "value", None)
+    elif imgui.menu_item_simple(f"{fa.ICON_FA_TIMELINE}   Add to timeline"):
+        send_to_timeline(app, look, f, key, "value", lane_current(f, key, lo, hi))
+    if imgui.is_item_hovered():
+        imgui.set_tooltip(f"A lane in '{look}'s timeline that moves this slider over time, starting where it is now.\n"
+                          "The timeline opens on it: click the lane to add points (or arm Rec and move the slider).")
+    if a and a.get("shape") != 8:   # its wave's swing can follow a depth lane
+        if "depth" in has:
+            if imgui.menu_item_simple(f"{fa.ICON_FA_WAVE_SQUARE}   Open its depth lane"):
+                send_to_timeline(app, look, f, key, "depth", None)
+        elif imgui.menu_item_simple(f"{fa.ICON_FA_WAVE_SQUARE}   Add depth lane (how far it swings)"):
+            send_to_timeline(app, look, f, key, "depth", 1.0)
+    imgui.separator()
+
+
+def send_to_timeline(app, look, f, key, mode, start):
+    """Give slider `key` of effect f a lane of that mode in the look on air (making it a timeline if it has none),
+    then open the timeline with that lane's points selected. start=None: it has one already, just show it."""
+    ed = S.tl if S.tl and S.tl["name"] == look and S.tl["tl"] is not None else None
+    if start is not None:
+        if ed is not None:   # the editor is open on this look: one undo step there
+            ed["tl"]["lanes"].append(dict(effect=f.id, key=key, mode=mode, mute=False, points=[[0.0, start, "ramp"]]))
+            tl_changed(app)
+        else:
+            tl = json.loads(json.dumps(app.timeline)) if app.timeline else new_timeline()
+            tl["lanes"].append(dict(effect=f.id, key=key, mode=mode, mute=False, points=[[0.0, start, "ramp"]]))
+            app.edit_timeline(look, tl)
+    if S.tl is None or S.tl["name"] != look:
+        open_timeline(app, look)
+    ed = S.tl
+    if app.timeline is not None:   # the editor works on the very timeline that plays (see timeline_follow)
+        ed["tl"] = app.timeline
+    ed["tab"], ed["view"] = "timeline", None
+    lane = next((ln for ln in ed["tl"]["lanes"] if ln["effect"] == f.id and ln["key"] == key
+                 and ln.get("mode", "value") == mode), None) if ed["tl"] else None
+    ed["sel"] = {id(p) for p in lane["points"]} if lane else set()
+    S.tl_focus = True
 
 
 def lane_current(f, key, lo, hi):

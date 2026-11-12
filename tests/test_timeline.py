@@ -10,6 +10,12 @@ import timeline as T
 from lookcheck import clean_look
 
 
+def plan1(*a, **k):
+    """plan_outro with the first lane's outro start as one number (the timelines in these tests time as one)."""
+    r = T.plan_outro(*a, **k)
+    return None if r is None else (min(r[0].values()), r[1])
+
+
 def tl(**kw):
     base = dict(unit="bars", length=8.0, grid=0.25, on_leave="finish", loops=0, lanes=[])
     base.update(kw)
@@ -145,33 +151,33 @@ class Outro(unittest.TestCase):
         self.assertEqual(ph.where(30 * 4, 0)[1], "done")   # past its end: holds the last values
 
     def test_no_outro_no_plan(self):
-        self.assertIsNone(T.plan_outro(T.Playhead(tl(length=8.0), 0.0, 0.0), 10.0, 0))
-        self.assertIsNone(T.plan_outro(T.Playhead(tl(length=16.0, intro_end=4.0, loop_end=16.0), 0.0, 0.0), 10.0, 0))
+        self.assertIsNone(plan1(T.Playhead(tl(length=8.0), 0.0, 0.0), 10.0, 0))
+        self.assertIsNone(plan1(T.Playhead(tl(length=16.0, intro_end=4.0, loop_end=16.0), 0.0, 0.0), 10.0, 0))
 
     def test_finish_the_pass(self):
         ph = T.Playhead(song(), beat=0.0, t=0.0)
-        self.assertEqual(T.plan_outro(ph, 6 * 4, 0), (12.0, 16.0))       # bar 6: the first pass ends at 12; the next look at 16
-        self.assertEqual(T.plan_outro(ph, 13 * 4, 0), (20.0, 24.0))      # bar 13: the second pass ends at 20
-        self.assertEqual(T.plan_outro(ph, 2 * 4, 0), (4.0, 8.0))         # in the intro: when the intro ends
-        self.assertEqual(T.plan_outro(ph, 12 * 4, 0), (12.0, 16.0))      # right on a pass end: now
-        self.assertEqual(T.plan_outro(ph, 6 * 4, 0, overlap=1.0), (12.0, 15.0))   # the next look overlaps its end
-        self.assertEqual(T.plan_outro(ph, 6 * 4, 0, overlap=9.0), (12.0, 12.0))   # never more than the outro
+        self.assertEqual(plan1(ph, 6 * 4, 0), (12.0, 16.0))       # bar 6: the first pass ends at 12; the next look at 16
+        self.assertEqual(plan1(ph, 13 * 4, 0), (20.0, 24.0))      # bar 13: the second pass ends at 20
+        self.assertEqual(plan1(ph, 2 * 4, 0), (4.0, 8.0))         # in the intro: when the intro ends
+        self.assertEqual(plan1(ph, 12 * 4, 0), (12.0, 16.0))      # right on a pass end: now
+        self.assertEqual(plan1(ph, 6 * 4, 0, overlap=1.0), (12.0, 15.0))   # the next look overlaps its end
+        self.assertEqual(plan1(ph, 6 * 4, 0, overlap=9.0), (12.0, 12.0))   # never more than the outro
 
     def test_jump(self):
         ph = T.Playhead(song(), beat=0.0, t=0.0)
-        self.assertEqual(T.plan_outro(ph, 6 * 4 + 1, 0, jump=True), (6.25, 10.25))   # launch now: straight away
+        self.assertEqual(plan1(ph, 6 * 4 + 1, 0, jump=True), (6.25, 10.25))   # launch now: straight away
         # launch on the bar: the outro ENDS on a bar line (bar 11 here)
-        self.assertEqual(T.plan_outro(ph, 6 * 4 + 1, 0, jump=True, grid=4), (7.0, 11.0))
+        self.assertEqual(plan1(ph, 6 * 4 + 1, 0, jump=True, grid=4), (7.0, 11.0))
         # an 8-bar phrase: ends on bar 16
-        self.assertEqual(T.plan_outro(ph, 6 * 4 + 1, 0, jump=True, grid=32), (12.0, 16.0))
+        self.assertEqual(plan1(ph, 6 * 4 + 1, 0, jump=True, grid=32), (12.0, 16.0))
         # phrases are counted from where beat 1 was set (bar_origin); this look started on beat 2
         ph2 = T.Playhead(song(), beat=1.0, t=0.0)
-        start, _ = T.plan_outro(ph2, 1.0 + 6 * 4, 0, jump=True, grid=32, bar_origin=0.0)
+        start, _ = plan1(ph2, 1.0 + 6 * 4, 0, jump=True, grid=32, bar_origin=0.0)
         self.assertAlmostEqual(1.0 + (start + 4.0) * 4, 64.0)   # ends on beat 64: the second phrase from the origin
 
     def test_seconds_jump_ignores_the_beat_grid(self):
         ph = T.Playhead(song(unit="seconds"), beat=0.0, t=100.0)
-        self.assertEqual(T.plan_outro(ph, 999, 107.5, jump=True, grid=4), (7.5, 11.5))
+        self.assertEqual(plan1(ph, 999, 107.5, jump=True, grid=4), (7.5, 11.5))
 
     def test_loop_passes(self):
         self.assertEqual(T.loop_passes(song(loops=3), 64), 3)       # its own count wins
@@ -227,7 +233,7 @@ class Handover(unittest.TestCase):
         self.run_to(f, 6 * 4)        # bar 6, in the first loop pass
         f.load_preset("B")           # Take
         self.assertEqual(f.fired, [])
-        self.assertEqual(f.playhead.outro_at, 12.0)
+        self.assertEqual(f.playhead.outro_start, 12.0)
         self.run_to(f, 13 * 4)       # into the outro
         self.assertEqual(f.playhead.where(f.tempo.phase, 0)[1], "outro")
         self.assertAlmostEqual(f.fx.amt, 1.0)        # the outro's lane value (it jumps at bar 12)
@@ -256,7 +262,7 @@ class Handover(unittest.TestCase):
         f = self.make(quantize=2, on_leave="jump")
         self.run_to(f, 6 * 4 + 1)
         f.load_preset("B")
-        self.assertEqual(f.playhead.outro_at, 7.0)   # so it ends on bar 11
+        self.assertEqual(f.playhead.outro_start, 7.0)   # so it ends on bar 11
         self.run_to(f, 12 * 4)
         self.assertEqual(f.fired, [("B", 11 * 4)])
 
@@ -397,7 +403,7 @@ class OutroKey(Handover):
         f = self.make()
         self.run_to(f, 6 * 4 + 1)
         f.go_outro()
-        self.assertAlmostEqual(f.playhead.outro_at, 6.25)   # now, not at the end of the pass
+        self.assertAlmostEqual(f.playhead.outro_start, 6.25)   # now, not at the end of the pass
         self.run_to(f, 12 * 4)
         self.assertEqual(f.fired, [("B", 10.25 * 4)])       # the 4-bar outro, then the next look
 
@@ -405,10 +411,10 @@ class OutroKey(Handover):
         f = self.make()
         self.run_to(f, 6 * 4)
         f.load_preset("C")             # waits for the end of the pass (bar 12) ...
-        self.assertEqual(f.playhead.outro_at, 12.0)
+        self.assertEqual(f.playhead.outro_start, 12.0)
         self.run_to(f, 7 * 4)
         f.go_outro()                   # ... until the Outro key: now, still into C
-        self.assertEqual(f.playhead.outro_at, 7.0)
+        self.assertEqual(f.playhead.outro_start, 7.0)
         self.run_to(f, 12 * 4)
         self.assertEqual(f.fired, [("C", 11 * 4)])
 
@@ -524,6 +530,74 @@ class Shapes(unittest.TestCase):
                                                    for s in ("bounce", "sharp_out", "nonsense")]))
         segs = [ln["points"][0][2] for ln in clean_look(look)["timeline"]["lanes"]]
         self.assertEqual(segs, ["bounce", "sharp_out", "ramp"])
+
+
+class PerLane(unittest.TestCase):
+    """Each lane has its own length and its own intro / loop / outro (or whole loop)."""
+
+    def lanes(self):
+        short = dict(effect="a", key="amt", mode="value", mute=False, length=2.0, intro_end=None, loop_end=None,
+                     points=[[0, 0.0, "ramp"], [2, 1.0, "ramp"]])                  # a 2-bar whole loop
+        song_ = dict(effect="b", key="amt", mode="value", mute=False, length=8.0, intro_end=2.0, loop_end=6.0,
+                     points=[[0, 0.0, "ramp"], [8, 1.0, "ramp"]])                  # 2 intro, 4 loop, 2 outro
+        sting = dict(effect="c", key="amt", mode="value", mute=False, length=4.0, intro_end=0.0, loop_end=3.0,
+                     points=[[0, 0.0, "ramp"], [4, 1.0, "ramp"]])                  # 3-bar loop, 1-bar outro
+        inherit = dict(effect="d", key="amt", mode="value", mute=False, points=[[0, 0.0, "ramp"], [16, 1.0, "ramp"]])
+        return [short, song_, sting, inherit]
+
+    def test_each_lane_plays_its_own_sections(self):
+        lanes = self.lanes()
+        ph = T.Playhead(tl(length=16.0, intro_end=4.0, loop_end=12.0, lanes=lanes), beat=0.0, t=0.0)
+        e = 9.0   # bar 10
+        self.assertEqual(ph.lane_where(lanes[0], e), (1.0, "loop", 4))       # 2-bar loop: 4 passes and a half
+        self.assertEqual(ph.lane_where(lanes[1], e), (5.0, "loop", 1))       # after its 2-bar intro: 7 into a 4-bar loop
+        self.assertEqual(ph.lane_where(lanes[2], e), (0.0, "loop", 3))       # 3 passes of 3 bars
+        self.assertEqual(ph.lane_where(lanes[3], e), (9.0, "loop", 0))       # no sections of its own: the timeline's
+        v = ph.values(e * 4, 0)
+        self.assertAlmostEqual(v[("a", "amt")], 0.5)
+        self.assertAlmostEqual(v[("b", "amt")], 5 / 8)
+
+    def test_a_lane_is_never_longer_than_the_timeline(self):
+        lane = dict(effect="a", key="amt", length=99.0, points=[])
+        self.assertEqual(T.lane_sections(tl(length=8.0), lane), (0.0, 8.0, 8.0))
+
+    def test_the_next_look_comes_after_the_longest_outro(self):
+        lanes = self.lanes()
+        ph = T.Playhead(tl(length=16.0, lanes=lanes), beat=0.0, t=0.0)   # the timeline itself: a whole loop
+        starts, next_at = T.plan_outro(ph, 3.5 * 4, 0)
+        # lane b: its loop pass (bars 2-6) ends at 6; lane c: its pass (0-3) ends at 6 too (3 -> 6);
+        # lane a and the inheriting lane d have no outro and keep looping
+        self.assertEqual(starts, {1: 6.0, 2: 6.0})
+        self.assertEqual(next_at, 8.0)                     # b's 2-bar outro is the longest: 6 + 2
+        ph.outro_at = starts
+        self.assertEqual(ph.lane_where(lanes[2], 6.5)[1], "outro")
+        self.assertEqual(ph.lane_where(lanes[2], 7.5)[1], "done")       # c's 1-bar outro is over, b's isn't
+        self.assertEqual(ph.lane_where(lanes[1], 7.5)[1], "outro")
+        self.assertEqual(ph.lane_where(lanes[0], 7.5)[1], "loop")       # a just keeps looping
+        self.assertEqual(ph.outro_start, 6.0)
+
+    def test_a_jump_on_the_bar_ends_every_outro_together(self):
+        lanes = self.lanes()
+        ph = T.Playhead(tl(length=16.0, lanes=lanes), beat=0.0, t=0.0)
+        starts, next_at = T.plan_outro(ph, 3.5 * 4, 0, jump=True, grid=4)
+        self.assertEqual(starts, {1: 4.0, 2: 5.0})        # the 2-bar outro and the 1-bar one both end on bar 6
+        self.assertEqual(next_at, 6.0)
+
+    def test_the_lead_lane_tells_the_looks_place(self):
+        lanes = self.lanes()
+        t_ = tl(length=16.0, lanes=lanes)
+        self.assertIs(T.lead_lane(t_), lanes[1])           # it has sections and the longest loop
+        self.assertEqual(T.loop_passes(t_, 8.0), 2)        # its loop is 4 bars: 8 bars of "every" = 2 passes
+        self.assertIsNone(T.lead_lane(tl(length=8.0)))     # no lanes: the timeline itself
+
+    def test_lane_sections_survive_cleaning(self):
+        lanes = self.lanes() + [dict(effect="e", key="amt", length="x", intro_end=5.0, loop_end=1.0, points=[])]
+        out = clean_look(dict(effects=[], timeline=tl(length=16.0, lanes=lanes)))["timeline"]["lanes"]
+        self.assertEqual((out[0]["length"], out[0]["intro_end"], out[0]["loop_end"]), (2.0, None, None))
+        self.assertEqual((out[1]["intro_end"], out[1]["loop_end"]), (2.0, 6.0))
+        self.assertNotIn("length", out[3])                 # inherits: stays inheriting
+        self.assertEqual(out[4]["length"], 16.0)           # a bad length: the timeline's
+        self.assertGreaterEqual(out[4]["loop_end"], out[4]["intro_end"])
 
 
 if __name__ == "__main__":

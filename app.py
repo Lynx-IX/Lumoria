@@ -2000,7 +2000,7 @@ class App:
                        every / (1 if unit == 2 else tp.beats_per_bar) if unit else every * tp.bpm / 60.0 / tp.beats_per_bar)
         n_pass = timeline.loop_passes(ph.tl, every_units)
         pos, section, n = ph.where(tp.phase, t)
-        a, b, _ = timeline.sections(ph.tl)
+        a, b, _ = timeline.lane_sections(ph.tl, timeline.lead_lane(ph.tl))
         frac = (pos - a) / (b - a) if section == "loop" else 0.0
         self.auto_progress = min(1.0, (n + frac) / n_pass)
         if section != "loop":
@@ -2321,13 +2321,13 @@ class App:
         ph, tl = self.playhead, self.timeline
         if not self.tl_recording or ph is None or tl is None or not timeline.valid_key(key):
             return
-        pos, _section, _n = ph.where(self.tempo.phase, t)
         lane = next((ln for ln in tl["lanes"] if ln["effect"] == f.id and ln["key"] == key
                      and ln.get("mode", "value") == "value"), None)
         if lane is None:
             lane = dict(effect=f.id, key=key, mode="value", mute=False, points=[])
             tl["lanes"].append(lane)
             self.set_lane_keys(tl)
+        pos = ph.lane_where(lane, ph.elapsed(self.tempo.phase, t))[0]   # where this lane is (its own sections)
         touch = self.rec_touch.get((f.id, key))
         step = 1 / 32 if tl.get("unit") != "seconds" else 0.05   # a point at most every 1/32 bar (or 50 ms)
         pts = lane["points"]

@@ -274,12 +274,16 @@ tab); *Make a timeline* gives it one, 8 bars long.
   replacing the points it passes over, like touch automation in a DAW. A take ends when you let go for a moment: it's
   tidied to the few points that keep its shape, saved in the look, and Ctrl+Z undoes it. The loop keeps going round,
   so you can record over a pass again. The playhead is red while recording.
-- **Intro / loop / outro:** drag the two markers on the ruler. The intro plays once when the look comes on, the loop
-  repeats while it stays on, and the outro plays when it leaves. *Whole loop* (no markers) just repeats.
-- **Leaving:** Take, a tile click, previous / next, MIDI and auto-play all wait for the outro. *On leave: Finish the
-  pass* plays the loop to its end first; *Jump to outro* starts it at once (timed to end on the launch beat, bar or
-  phrase when *launch* is set). The next look comes in so its transition overlaps the end of the outro, while the old
-  look plays its outro out as it fades. The crossfader, random auto-play and firing the same look skip the outro.
+- **Per lane: length and intro / loop / outro.** Each lane has its own length (at most the timeline's *Length*) and
+  its own sections, set in its name column: *Whole* just loops from start to end; *I / L / O* gives it an intro that
+  plays once when the look comes on, a loop that repeats while it stays on, and an outro that plays when it leaves.
+  Drag a lane's markers along its top edge: violet = the intro ends, magenta = the loop ends, cyan = the lane ends
+  (past it the lane is shaded). So a 2-bar loop can run under an 8-bar build, each with its own playhead.
+- **Leaving:** Take, a tile click, previous / next, MIDI and auto-play all wait for the outros. *On leave: Finish the
+  pass* lets each lane play its loop to the end first; *Jump to outro* starts them at once (timed so they all end on
+  the launch beat, bar or phrase when *launch* is set). Lanes without an outro keep looping. The next look comes in
+  once the longest outro is done, its transition overlapping that end, while the old look plays its outros out as it
+  fades. The crossfader, random auto-play and firing the same look skip the outro.
 - **Auto-play** stays on a timeline look for whole loop passes: *Stay* on the *Transition & stay* tab sets how many
   (0: as many as fit the playlist's *every*).
 - The timeline is saved in the look, so exporting and importing a look keeps it. Changes save as you make them, and

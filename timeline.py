@@ -75,22 +75,48 @@ def value_at(points, pos):
     return points[-1][1]
 
 
-def sections(tl):
-    """(intro_end, loop_end, length) in the timeline's own unit. No markers: the whole timeline is the loop."""
-    length = tl["length"]
-    a = tl.get("intro_end")
-    b = tl.get("loop_end")
+def lane_sections(tl, lane=None):
+    """(intro_end, loop_end, length) of one lane, in the timeline's unit. A lane can have its own length (at most the
+    timeline's) and its own intro / loop / outro; a key it doesn't have comes from the timeline (so older timelines,
+    with one set of markers, play as before). intro_end / loop_end set to None: the whole lane is the loop.
+    lane=None: the timeline's own (its default for lanes, and the timing of a timeline with no lanes)."""
+    own = lambda k: lane[k] if lane is not None and k in lane else tl.get(k)
+    length = min(max(own("length") or tl["length"], 1 / 64), tl["length"])
+    a, b = own("intro_end"), own("loop_end")
     a = 0.0 if a is None else min(max(0.0, a), length)
     b = length if b is None else min(max(a, b), length)
-    if b - a < 1e-6:   # an empty loop can't repeat: treat the timeline as one loop
+    if b - a < 1e-6:   # an empty loop can't repeat: treat the lane as one loop
         a, b = 0.0, length
     return a, b, length
 
 
+def sections(tl):
+    """The timeline's own (intro_end, loop_end, length): see lane_sections."""
+    return lane_sections(tl, None)
+
+
+def timing_lanes(tl):
+    """The lanes that keep time: every lane, or - for a timeline with none - the timeline itself (as None)."""
+    return tl.get("lanes") or [None]
+
+
+def lead_lane(tl):
+    """The lane the look's place is told by (the editor's status, the tile badge, auto-play's loop passes): the one
+    with intro / loop / outro and the longest loop, else the longest lane."""
+    best, key = None, None
+    for lane in timing_lanes(tl):
+        a, b, length = lane_sections(tl, lane)
+        k = (b - a < length - 1e-6, b - a, length)   # has markers, loop length, length
+        if key is None or k > key:
+            best, key = lane, k
+    return best
+
+
 class Playhead:
     """Where the look on air is in its timeline. Started when the look comes on; time is counted on the tempo clock's
-    beats (bars unit), so it follows tempo changes, or in seconds. Once the look is told to leave, `outro_at` (in
-    elapsed time, the timeline's unit) is when its outro starts: from then on it plays the outro, once."""
+    beats (bars unit), so it follows tempo changes, or in seconds. Each lane runs its own sections on that clock.
+    Once the look is told to leave, `outro_at` says when each lane's outro starts ({lane index: elapsed time}; a plain
+    number: every lane at once): from then on that lane plays its outro, once."""
 
     def __init__(self, tl, beat, t, beats_per_bar=4):
         self.tl = tl
@@ -104,27 +130,46 @@ class Playhead:
             return max(0.0, t - self.start_t)
         return max(0.0, (beat - self.start_beat) / max(1, self.beats_per_bar))
 
-    def has_outro(self):
-        a, b, length = sections(self.tl)
-        return length - b > 1e-6
+    @property
+    def outro_start(self):
+        """When the first outro starts (elapsed time), or None while the look isn't leaving."""
+        o = self.outro_at
+        if o is None or isinstance(o, (int, float)):
+            return o
+        return min(o.values()) if o else None
 
-    def where(self, beat, t):
-        """(position on the timeline, section "intro" / "loop" / "outro" / "done", loop passes completed)."""
-        e = self.elapsed(beat, t)
-        a, b, length = sections(self.tl)
-        if self.outro_at is not None and e >= self.outro_at - 1e-9:
-            n = int(max(0.0, self.outro_at - a) // (b - a))
-            pos = min(length, b + (e - self.outro_at))
+    def lane_outro_at(self, lane):
+        o = self.outro_at
+        if o is None or isinstance(o, (int, float)):
+            return o
+        lanes = timing_lanes(self.tl)
+        i = next((k for k, ln in enumerate(lanes) if ln is lane), None)
+        return o.get(i)
+
+    def has_outro(self):
+        return any(length - b > 1e-6 for a, b, length in (lane_sections(self.tl, ln) for ln in timing_lanes(self.tl)))
+
+    def lane_where(self, lane, e):
+        """(position in this lane, section "intro" / "loop" / "outro" / "done", loop passes completed) at elapsed e."""
+        a, b, length = lane_sections(self.tl, lane)
+        start = self.lane_outro_at(lane)
+        if start is not None and length - b > 1e-6 and e >= start - 1e-9:
+            n = int(max(0.0, start - a) // (b - a))
+            pos = min(length, b + (e - start))
             return pos, ("outro" if pos < length else "done"), n
         if e < a:
             return e, "intro", 0
         n, r = divmod(e - a, b - a)
         return a + r, "loop", int(n)
 
-    def pass_end(self, e):
-        """When the section playing at elapsed time e ends: the intro's end, or the end of this loop pass (now, if
-        it's right on the end of one)."""
-        a, b, _ = sections(self.tl)
+    def where(self, beat, t):
+        """The look's place, told by its lead lane (see lead_lane): (position, section, loop passes)."""
+        return self.lane_where(lead_lane(self.tl), self.elapsed(beat, t))
+
+    def pass_end(self, e, lane=None):
+        """When the section a lane is playing at elapsed time e ends: the intro's end, or the end of this loop pass
+        (now, if it's right on the end of one)."""
+        a, b, _ = lane_sections(self.tl, lane)
         if e < a:
             return a
         k = (e - a) / (b - a)
@@ -133,30 +178,29 @@ class Playhead:
 
     def values(self, beat, t, mode="value", holds=None):
         """{(effect id, key): value} for every lane of that mode ("value": the slider's value, "depth": how far its
-        wave swings, 0..1) at the current position. A lane in `holds` ({key: elapsed time}) lets go of its slider
+        wave swings, 0..1), each at its own place. A lane in `holds` ({key: elapsed time}) lets go of its slider
         until then (someone took it over: see hold_until)."""
-        pos, _, _ = self.where(beat, t)
-        e = self.elapsed(beat, t) if holds else 0.0
+        e = self.elapsed(beat, t)
         out = {}
         for lane in self.tl.get("lanes", []):
             key = (lane["effect"], lane["key"])
             if lane.get("mode", "value") != mode or lane.get("mute") or (holds and e < holds.get(key, -1.0)):
                 continue
-            v = value_at(lane["points"], pos)
+            v = value_at(lane["points"], self.lane_where(lane, e)[0])
             if v is not None:
                 out[key] = v
         return out
 
     def hold_until(self, effect, key, beat, t):
         """Someone moved this slider by hand (MIDI or its card): when its lane takes it back - at the lane's next
-        point, or where the section playing now ends (elapsed time; the outro keeps it until the look changes)."""
+        point, or where the section it's playing now ends (elapsed time; an outro keeps it until the look changes)."""
         e = self.elapsed(beat, t)
-        pos, section, _ = self.where(beat, t)
-        a, b, length = sections(self.tl)
+        lane = next((ln for ln in self.tl.get("lanes", []) if ln["effect"] == effect and ln["key"] == key), None)
+        pos, section, _ = self.lane_where(lane, e)
+        a, b, length = lane_sections(self.tl, lane)
         if section in ("outro", "done"):
             return float("inf")
         end = a if section == "intro" else b
-        lane = next((ln for ln in self.tl.get("lanes", []) if ln["effect"] == effect and ln["key"] == key), None)
         ahead = [p[0] for p in (lane["points"] if lane else []) if pos + 1e-9 < p[0] <= end]
         return e + ((min(ahead) if ahead else end) - pos)
 
@@ -191,37 +235,44 @@ def simplify(points, tol=0.02):
 
 
 def plan_outro(ph, beat, t, jump=False, grid=0.0, bar_origin=0.0, overlap=0.0):
-    """When a look is told to leave: (when its outro starts, when the next look should start coming in), both in the
-    playhead's elapsed time (the timeline's unit), or None if the timeline has no outro.
+    """When a look is told to leave: ({lane index: when its outro starts}, when the next look should start coming in),
+    in the playhead's elapsed time (the timeline's unit), or None if no lane has an outro.
 
-    jump: the outro starts now (else the loop pass playing now finishes first). grid: the launch grid in beats
-    (0 = launch now) - a jump is then timed so the outro ENDS on a launch boundary (bars timelines only; counted
-    from bar_origin like the tempo clock's phrases). overlap: the next look's transition, in the timeline's unit -
-    it comes in that much before the outro ends, so the two overlap (never more than the outro itself)."""
-    if not ph.has_outro():
+    Each lane with an outro starts it when its own loop pass finishes (jump: now); the next look comes in after the
+    longest of them ends, its transition (`overlap`, in the timeline's unit) overlapping that end - never more than
+    the longest outro. Lanes without an outro keep looping until then. grid: the launch grid in beats (0 = launch
+    now): a jump is timed so every outro ENDS together on a launch boundary (bars timelines only; counted from
+    bar_origin like the tempo clock's phrases)."""
+    lanes = timing_lanes(ph.tl)
+    outros = {}
+    for i, lane in enumerate(lanes):
+        a, b, length = lane_sections(ph.tl, lane)
+        if length - b > 1e-6:
+            outros[i] = length - b
+    if not outros:
         return None
-    a, b, length = sections(ph.tl)
-    outro = length - b
     now = ph.elapsed(beat, t)
-    if not jump:
-        start = ph.pass_end(now)
-    elif grid > 0 and ph.tl.get("unit") != "seconds":
+    if jump and grid > 0 and ph.tl.get("unit") != "seconds":
         bpb = max(1, ph.beats_per_bar)
-        end_beat = ph.start_beat + (now + outro) * bpb            # the soonest it could end
-        k = math.ceil((end_beat - bar_origin) / grid - 1e-6)      # ... on the next launch boundary
-        start = (k * grid + bar_origin - ph.start_beat) / bpb - outro
+        end_beat = ph.start_beat + (now + max(outros.values())) * bpb   # the soonest the longest could end
+        k = math.ceil((end_beat - bar_origin) / grid - 1e-6)            # ... on the next launch boundary
+        end = (k * grid + bar_origin - ph.start_beat) / bpb
+        starts = {i: end - o for i, o in outros.items()}
+    elif jump:
+        starts = {i: now for i in outros}
     else:
-        start = now
-    end = start + outro
-    return start, max(start, end - min(max(0.0, overlap), outro))
+        starts = {i: ph.pass_end(now, lanes[i]) for i in outros}
+    end = max(starts[i] + o for i, o in outros.items())
+    longest = max(outros.values())
+    return starts, max(min(starts.values()), end - min(max(0.0, overlap), longest))
 
 
 def loop_passes(tl, every_units):
-    """How many loop passes auto-play stays for: the timeline's own `loops`, else as many as fit auto-play's
-    "every" (given in the timeline's unit), at least one."""
+    """How many loop passes auto-play stays for: the timeline's own `loops`, else as many of its lead lane's loops
+    as fit auto-play's "every" (given in the timeline's unit), at least one."""
     if tl.get("loops", 0) > 0:
         return int(tl["loops"])
-    a, b, _ = sections(tl)
+    a, b, _ = lane_sections(tl, lead_lane(tl))
     return max(1, round(every_units / (b - a)))
 
 
@@ -257,8 +308,16 @@ def clean_timeline(tl, num, text):
             seg = p[2] if len(p) > 2 and p[2] in SEGMENTS else "ramp"
             pts.append([x, v, seg])
         pts.sort(key=lambda p: p[0])
-        lanes.append(dict(effect=eff, key=key, mode="depth" if lane.get("mode") == "depth" else "value",
-                          mute=bool(lane.get("mute", False)), points=pts))
+        out_lane = dict(effect=eff, key=key, mode="depth" if lane.get("mode") == "depth" else "value",
+                        mute=bool(lane.get("mute", False)), points=pts)
+        if lane.get("length") is not None:   # its own length and sections (else the timeline's)
+            out_lane["length"] = num(lane["length"], length, 1 / 64, length)
+        for k in ("intro_end", "loop_end"):
+            if k in lane:
+                out_lane[k] = None if lane[k] is None else num(lane[k], 0.0, 0.0, out_lane.get("length", length))
+        if out_lane.get("intro_end") is not None and out_lane.get("loop_end") is not None                 and out_lane["loop_end"] < out_lane["intro_end"]:
+            out_lane["loop_end"] = out_lane["intro_end"]
+        lanes.append(out_lane)
     out["lanes"] = lanes
     return out
 

@@ -1,4 +1,4 @@
-"""Draws the Lumoria logo set as SVG (assets/svg/) and renders the Neon logo style's PNGs and .ico
+"""Draws the LumaTRX logo set as SVG (assets/svg/) and renders the Neon logo style's PNGs and .ico
 (*_neon.*; the original artwork keeps the plain names and stays the default).
 
     python assets/make_logo.py
@@ -109,6 +109,8 @@ LETTERS = {
     "R": (112, "M8,100 V8 H82 Q104,8 104,30 V34 Q104,56 82,56 H8 M62,56 L106,100"),
     "I": (16, "M8,0 V100"),
     "A": (124, "M4,100 L62,4 L120,100 M30,66 H94"),
+    "T": (112, "M2,8 H110 M56,8 V100"),
+    "X": (120, "M8,4 L112,100 M112,4 L8,100"),
 }
 
 
@@ -131,7 +133,7 @@ def shift_path(d, dx):
 
 def wordmark(fill, weight=12, gap=34):
     x, parts = 0, []
-    for ch in "LUMORIA":
+    for ch in "LUMATRX":
         w, d = LETTERS[ch]
         parts.append(f'<path d="{shift_path(d, x)}"/>')   # real coordinates, so one gradient spans the word
         x += w + gap
@@ -143,7 +145,7 @@ def wordmark(fill, weight=12, gap=34):
 
 def render(svg_path, png_path, w, h):
     """SVG -> PNG with transparency, through headless Edge."""
-    html = os.path.join(tempfile.gettempdir(), "lumoria_logo_render.html")
+    html = os.path.join(tempfile.gettempdir(), "lumatrx_logo_render.html")
     with open(html, "w", encoding="utf8") as fh:
         fh.write(f'<html><body style="margin:0;background:transparent">'
                  f'<img src="file:///{svg_path.replace(os.sep, "/")}" width="{w}" height="{h}"></body></html>')
@@ -159,16 +161,16 @@ def main():
     ice = ('<linearGradient id="ice" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="0" y2="110">'
            '<stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#b9cdea"/></linearGradient>')
     files = {
-        "lumoria_symbol_glow.svg": svg(symbol_group(glow=.75), defs=g + BLOOM),
-        "lumoria_symbol.svg": svg(symbol_group(core=False), defs=g),
-        "lumoria_symbol_mono.svg": svg(symbol_group(fill="currentColor", core=False)),
-        "lumoria_icon.svg": svg(tile(symbol_group(glow=.55))[0], defs=g + BLOOM + tile("")[1]),
-        "lumoria_icon_small.svg": svg(tile(symbol_group(k=1.7, core=False), small=True)[0], defs=g + tile("")[1]),
+        "lumatrx_symbol_glow.svg": svg(symbol_group(glow=.75), defs=g + BLOOM),
+        "lumatrx_symbol.svg": svg(symbol_group(core=False), defs=g),
+        "lumatrx_symbol_mono.svg": svg(symbol_group(fill="currentColor", core=False)),
+        "lumatrx_icon.svg": svg(tile(symbol_group(glow=.55))[0], defs=g + BLOOM + tile("")[1]),
+        "lumatrx_icon_small.svg": svg(tile(symbol_group(k=1.7, core=False), small=True)[0], defs=g + tile("")[1]),
     }
     wb, ww, wh = wordmark("url(#ice)")
-    files["lumoria_wordmark.svg"] = svg(wb, ww, wh, defs=ice)
+    files["lumatrx_wordmark.svg"] = svg(wb, ww, wh, defs=ice)
     wb, ww, wh = wordmark("url(#gw)")
-    files["lumoria_wordmark_gradient.svg"] = svg(wb, ww, wh, defs=gradient("gw", 0, ww - 20))
+    files["lumatrx_wordmark_gradient.svg"] = svg(wb, ww, wh, defs=gradient("gw", 0, ww - 20))
     for name, text in files.items():
         with open(os.path.join(SVG, name), "w", encoding="utf8") as fh:
             fh.write(text)
@@ -176,20 +178,20 @@ def main():
     def png(name, out, w, h):
         render(os.path.join(SVG, name), os.path.join(HERE, out), w, h)
 
-    png("lumoria_symbol.svg", "lumoria_symbol_neon.png", 512, 512)          # top bar (small): crisp, no glow
-    png("lumoria_symbol_glow.svg", "lumoria_symbol_neon_glow.png", 512, 512)  # welcome screen and other large uses
-    png("lumoria_icon.svg", "lumoria_icon_neon.png", 512, 512)
-    png("lumoria_icon_small.svg", "lumoria_icon_neon_small.png", 512, 512)
+    png("lumatrx_symbol.svg", "lumatrx_symbol_neon.png", 512, 512)          # top bar (small): crisp, no glow
+    png("lumatrx_symbol_glow.svg", "lumatrx_symbol_neon_glow.png", 512, 512)  # welcome screen and other large uses
+    png("lumatrx_icon.svg", "lumatrx_icon_neon.png", 512, 512)
+    png("lumatrx_icon_small.svg", "lumatrx_icon_neon_small.png", 512, 512)
     ww, wh = wordmark("")[1:]
-    png("lumoria_wordmark.svg", "lumoria_wordmark_neon.png", ww * 2, wh * 2)
-    png("lumoria_wordmark_gradient.svg", "lumoria_wordmark_neon_gradient.png", ww * 2, wh * 2)
+    png("lumatrx_wordmark.svg", "lumatrx_wordmark_neon.png", ww * 2, wh * 2)
+    png("lumatrx_wordmark_gradient.svg", "lumatrx_wordmark_neon_gradient.png", ww * 2, wh * 2)
 
     # the .ico: the bold small tile for 16-32 px, the full tile from 48 up
-    big = cv2.imread(os.path.join(HERE, "lumoria_icon_neon.png"), cv2.IMREAD_UNCHANGED)
-    small = cv2.imread(os.path.join(HERE, "lumoria_icon_neon_small.png"), cv2.IMREAD_UNCHANGED)
+    big = cv2.imread(os.path.join(HERE, "lumatrx_icon_neon.png"), cv2.IMREAD_UNCHANGED)
+    small = cv2.imread(os.path.join(HERE, "lumatrx_icon_neon_small.png"), cv2.IMREAD_UNCHANGED)
     frames = [(s, cv2.resize(small if s <= 32 else big, (s, s), interpolation=cv2.INTER_AREA))
               for s in (16, 20, 24, 32, 40, 48, 64, 128, 256)]
-    write_ico(os.path.join(HERE, "lumoria_neon.ico"), frames)
+    write_ico(os.path.join(HERE, "lumatrx_neon.ico"), frames)
 
 
 def write_ico(path, frames):
@@ -205,5 +207,38 @@ def write_ico(path, frames):
         fh.write(head + entries + b"".join(blobs))
 
 
+def chrome_wordmark():
+    """The default wordmark (lumatrx_wordmark.png): the same letters as hollow chrome tubes - a bright edge around a
+    see-through middle, lit from above, with a soft blue-white glow - to match the original glossy artwork."""
+    body, w, h = wordmark("#fff", weight=13)
+    letters = body.replace('stroke="#fff"', 'stroke="white"')
+    inner = body.replace('stroke="#fff"', 'stroke="#5a5a5a"').replace('stroke-width="13"', 'stroke-width="5"')   # half see-through
+    defs = ('<linearGradient id="chrome" gradientUnits="userSpaceOnUse" x1="0" y1="10" x2="0" y2="110">'
+            '<stop offset="0" stop-color="#ffffff"/><stop offset=".45" stop-color="#dfe9f7"/>'
+            '<stop offset=".55" stop-color="#a9bcd8"/><stop offset="1" stop-color="#e8f0fb"/></linearGradient>'
+            f'<mask id="hollow" maskUnits="userSpaceOnUse" x="0" y="0" width="{w}" height="{h}">'
+            f'<rect width="{w}" height="{h}" fill="black"/>{letters}{inner}</mask>'
+            '<filter id="soft" x="-5%" y="-30%" width="110%" height="160%"><feGaussianBlur stdDeviation="3"/></filter>')
+    glow = body.replace('stroke="#fff"', 'stroke="#9fd0ff"')
+    art = (f'<g filter="url(#soft)" opacity=".45">{glow}</g>'
+           f'<rect width="{w}" height="{h}" fill="url(#chrome)" mask="url(#hollow)"/>')
+    return svg(art, w, h, defs=defs), w, h
+
+
+def make_wordmark_only():
+    """Just the default (chrome) wordmark: python assets/make_logo.py --wordmark"""
+    os.makedirs(SVG, exist_ok=True)
+    text, w, h = chrome_wordmark()
+    path = os.path.join(SVG, "lumatrx_wordmark_chrome.svg")
+    with open(path, "w", encoding="utf8") as fh:
+        fh.write(text)
+    render(path, os.path.join(HERE, "lumatrx_wordmark.png"), w * 2, h * 2)
+
+
 if __name__ == "__main__":
-    main()
+    import sys
+    if "--wordmark" in sys.argv:
+        make_wordmark_only()
+    else:
+        main()
+        make_wordmark_only()

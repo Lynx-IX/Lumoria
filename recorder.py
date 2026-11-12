@@ -1,15 +1,15 @@
 """Recording the output, with sound, to one video file.
 
-The writing happens in a small helper process (started quietly with Lumoria), so starting an encoder and
-encoding frames never stall the show: Lumoria copies each frame into shared memory and sends a note down a pipe.
-Frames arrive whenever Lumoria renders one; the file runs at a fixed rate (30 or 60 fps), so a frame is written
+The writing happens in a small helper process (started quietly with LumaTRX), so starting an encoder and
+encoding frames never stall the show: LumaTRX copies each frame into shared memory and sends a note down a pipe.
+Frames arrive whenever LumaTRX renders one; the file runs at a fixed rate (30 or 60 fps), so a frame is written
 as many times as the clock says (repeated if the app is running slower, skipped if faster) and the video plays
-back at real speed. Sound comes from Lumoria's audio input (the one picked under Audio), counted by its samples.
+back at real speed. Sound comes from LumaTRX's audio input (the one picked under Audio), counted by its samples.
 
 Written with PyAV (FFmpeg's libraries). H.264 uses the graphics card's own encoder when there is one (NVIDIA
 NVENC, AMD AMF, Intel Quick Sync), else Windows' Media Foundation, else the x264 software encoder.
 
-Run as `python recorder.py <pipe>` (or `Lumoria.exe --record-worker <pipe>`) it is that helper.
+Run as `python recorder.py <pipe>` (or `LumaTRX.exe --record-worker <pipe>`) it is that helper.
 """
 import os
 import subprocess
@@ -31,7 +31,7 @@ SLOTS = 6   # frames that can wait in shared memory for the helper
 
 
 class Recorder:
-    """Lumoria's side: starts the helper, hands it frames and sound, keeps the timer."""
+    """LumaTRX's side: starts the helper, hands it frames and sound, keeps the timer."""
 
     def __init__(self):
         self.path, self.error, self.encoder = None, None, ""
@@ -55,7 +55,7 @@ class Recorder:
                 self._spawn()
 
     def _spawn(self):
-        address = rf"\\.\pipe\lumoria-rec-{os.getpid()}-{time.perf_counter_ns()}"
+        address = rf"\\.\pipe\lumatrx-rec-{os.getpid()}-{time.perf_counter_ns()}"
         listener = Listener(address, family="AF_PIPE")
         if getattr(sys, "frozen", False):
             cmd = [sys.executable, "--record-worker", address]
@@ -100,7 +100,7 @@ class Recorder:
         """Begin a new file (named by date and time) in folder; returns its path. sound: (sample rate, channels)
         of the audio input, or None for video only. Problems end the recording with self.error set."""
         os.makedirs(folder, exist_ok=True)
-        self.path = os.path.join(folder, time.strftime("Lumoria %Y-%m-%d %H-%M-%S") + FORMATS[fmt][1])
+        self.path = os.path.join(folder, time.strftime("LumaTRX %Y-%m-%d %H-%M-%S") + FORMATS[fmt][1])
         self.fps, self.error, self.ready, self.sound = fps, None, False, bool(sound)
         self.t0, self.dropped, self._state = None, 0, "starting"
         w, h = size
@@ -180,7 +180,7 @@ class Recorder:
             self._shm = None
 
     def close(self):
-        """Lumoria is quitting: finish any file and let the helper go."""
+        """LumaTRX is quitting: finish any file and let the helper go."""
         self.stop()
         if self._conn:
             try:

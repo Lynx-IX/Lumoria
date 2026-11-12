@@ -1,8 +1,8 @@
-"""Checking look files before Lumoria uses them.
+"""Checking look files before LumaTRX uses them.
 
-A look (one of your own, one imported from a .lumoria-look / .lumoria-playlist file, or a look pack) is JSON. This
-keeps only the fields Lumoria understands, each with the right type and a sensible range, and drops anything
-unknown or broken, so a damaged or hand-edited file can't crash Lumoria when it's loaded. clean_look raises
+A look (one of your own, one imported from a .lumatrx-look / .lumatrx-playlist file, or a look pack) is JSON. This
+keeps only the fields LumaTRX understands, each with the right type and a sensible range, and drops anything
+unknown or broken, so a damaged or hand-edited file can't crash LumaTRX when it's loaded. clean_look raises
 ValueError only when nothing usable is left.
 """
 import base64
@@ -145,7 +145,7 @@ def _item(e, depth, budget):
 def clean_look(look):
     """A safe copy of a look: only known fields, right types, sensible ranges. ValueError if it isn't a look."""
     if not isinstance(look, dict) or not isinstance(look.get("effects"), list):
-        raise ValueError("not a Lumoria look")
+        raise ValueError("not a LumaTRX look")
     budget = [MAX_ITEMS]
     items = [c for c in (_item(e, 0, budget) for e in look["effects"]) if c]
     out = dict(version=_int(look.get("version"), 1, 0, 1000), effects=items)   # no version: the oldest format

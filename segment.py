@@ -40,7 +40,7 @@ class Segmenter:
             self._thread.start()
 
     def stop(self):
-        """Let the worker finish (Lumoria is closing)."""
+        """Let the worker finish (LumaTRX is closing)."""
         self._stop = True
         self._wake.set()
         if self._thread:

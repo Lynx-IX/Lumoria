@@ -1,11 +1,11 @@
-<p align="center"><img src="assets/lumoria_symbol.png" width="120" alt=""><br>
-<img src="assets/lumoria_wordmark.png" width="360" alt="Lumoria"></p>
+<p align="center"><img src="assets/lumatrx_symbol.png" width="120" alt=""><br>
+<img src="assets/lumatrx_wordmark.png" width="360" alt="LumaTRX"></p>
 
 <p align="center"><b>Visual FX Engine</b>: real-time GPU video effects for streams, music and live visuals.</p>
 
-![Lumoria running the Neon Lines look](docs/screenshot.png)
+![LumaTRX running the Neon Lines look](docs/screenshot.png)
 
-Lumoria takes your camera, a screen, a window or a video, runs it through a chain of GPU effects that react to
+LumaTRX takes your camera, a screen, a window or a video, runs it through a chain of GPU effects that react to
 your music, and sends the result to OBS (Spout, window capture or the OBS Virtual Camera) or straight to a video
 file. Build looks, line them up in a playlist and fire them live, on the beat.
 
@@ -35,7 +35,7 @@ file. Build looks, line them up in a playlist and fire them live, on the beat.
   interface. MIDI learn covers each effect's Scale, Rotate and Centre (click the left half of Centre for x, the
   right half for y) and its music note. Click a slider's Automate button, or right-click the slider, to link a
   button that pauses and resumes its automation without losing the settings. *Settings > MIDI > Button lights*:
-  tick a controller and its linked buttons light up to match. Lumoria echoes the button's own note or CC, which
+  tick a controller and its linked buttons light up to match. LumaTRX echoes the button's own note or CC, which
   works on controllers like the MIDI Mix.
 
 ![3D effects: Mandelbulb, an endless Menger sponge dive, the Visionary hall and the Colonnade](docs/screenshot-3d.jpg)
@@ -44,18 +44,18 @@ file. Build looks, line them up in a playlist and fire them live, on the beat.
 
 ## Download
 Get the Windows installer from the [Releases](../../releases) page. No admin rights needed; your looks and
-settings live in `%APPDATA%\Lumoria` and survive updates. After installing, *Lumoria Self-Test* in the Start menu
+settings live in `%APPDATA%\LumaTRX` and survive updates. After installing, *LumaTRX Self-Test* in the Start menu
 checks your PC (graphics, AI mask, capture, recording) and writes a short report.
 
 **Needs:** Windows 10 or 11 (64-bit) and a graphics card with OpenGL 3.3 and DirectX 12 (anything from the last
 several years: NVIDIA, AMD or Intel). OBS Studio is optional; the Spout2 plugin for OBS gives the best quality.
 
 ## Getting it into OBS
-- **Spout (best quality):** press **Spout** in Lumoria's top bar, then in OBS add a *Spout2 Capture* source
-  (from the [Spout2 plugin for OBS](https://github.com/Off-World-Live/obs-spout2-plugin)) and pick *Lumoria*.
+- **Spout (best quality):** press **Spout** in LumaTRX's top bar, then in OBS add a *Spout2 Capture* source
+  (from the [Spout2 plugin for OBS](https://github.com/Off-World-Live/obs-spout2-plugin)) and pick *LumaTRX*.
   Full resolution straight from the graphics card, and a transparent background (the *Background* effect set to
   *Transparent*) stays transparent.
-- **Window Capture:** Add Source → Window Capture → *Lumoria Output*, capture method *Windows 10 (1903 and up)*.
+- **Window Capture:** Add Source → Window Capture → *LumaTRX Output*, capture method *Windows 10 (1903 and up)*.
   Keep the output window open (it can sit behind other windows, just not minimised).
 - **Virtual cam** (top bar): for Discord, Zoom and browsers, through the OBS Virtual Camera device (installed
   with OBS). Don't also press OBS's own *Start Virtual Camera*.
@@ -64,8 +64,8 @@ several years: NVIDIA, AMD or Intel). OBS Studio is optional; the Spout2 plugin 
 **Rec** in the top bar (or `R`, or a MIDI pad: *Record on / off*) records the output to a video file, with a running
 timer on the button. Settings > Output picks the format (*MP4 (H.264)*: plays and edits everywhere; *MP4 small*:
 a third of the size; *MOV for editing*: MJPEG frames + uncompressed sound, large), the rate (30 / 60 fps), *Sound*
-and the folder (default Videos\Lumoria). *Sound* records the audio input picked under Audio into the same file
-(use Voicemeeter or a loopback input to record what you hear). The file plays back at real speed even if Lumoria
+and the folder (default Videos\LumaTRX). *Sound* records the audio input picked under Audio into the same file
+(use Voicemeeter or a loopback input to record what you hear). The file plays back at real speed even if LumaTRX
 dips below the recording rate. Writing happens in a small helper process with the graphics card's own encoder
 (NVENC / AMF / Quick Sync, else Windows or x264), so recording doesn't slow the show; it starts about 0.2 s after
 the press while the encoder starts. Transparent backgrounds aren't kept in recordings (use Spout into OBS).
@@ -115,7 +115,7 @@ They live in `samples/`; the welcome (Settings > About > Show the welcome again)
   Wipe / Flash / Morph) and time, plus how long auto-play stays on it (whole loop passes, for a look with a
   timeline). Its other tab is the look's *Timeline*.
   **Import / Export** (playlist bar) share or back up looks as files: *Export* saves the whole playlist to one
-  `.lumoria-playlist`, right-click a tile > *Export this look* saves one `.lumoria-look`. *Import* adds the looks
+  `.lumatrx-playlist`, right-click a tile > *Export this look* saves one `.lumatrx-look`. *Import* adds the looks
   in such files to the end of your playlist (with their transitions and timing); a name you already use gets
   a number, so nothing is overwritten. Looks don't include sources, so they work on anyone's setup.
 - **Sources:** *Input* has the main source plus Source 2-4 (cameras, video files, images, screen capture).
@@ -161,13 +161,13 @@ They live in `samples/`; the welcome (Settings > About > Show the welcome again)
 ## Logo files
 `assets/svg/` holds the Neon logo as vector art: the symbol with glow, flat and one-colour, the app icon tile (and a bolder
 small one for 16-32 px), and the wordmark in white and gradient. `python assets/make_logo.py` draws them all from one
-set of shapes and renders them as `assets/*_neon.*`. The original artwork keeps the plain names (`lumoria.ico`,
-`lumoria_icon.png`, ...) and is what Lumoria (top bar, welcome, window and taskbar icon) and the installer use; the
+set of shapes and renders them as `assets/*_neon.*`. The original artwork keeps the plain names (`lumatrx.ico`,
+`lumatrx_icon.png`, ...) and is what LumaTRX (top bar, welcome, window and taskbar icon) and the installer use; the
 Neon set is kept as artwork only.
 
 ## Audio react
 Pick an input under *Audio* (it's remembered for next time). To follow music playing on the PC, pick an output
-under *What you hear* at the bottom of the list (Windows' default output first): Lumoria listens to what that device
+under *What you hear* at the bottom of the list (Windows' default output first): LumaTRX listens to what that device
 plays, like OBS's Desktop Audio, with no extra software. A loopback input (e.g. *Loopback Mix (MOTU M Series)* or
 a Voicemeeter Out) works too. Effects with their **music note** lit follow the chosen band; recordings take their
 sound from the same input. Audio and 3D effects choose what the music does in their own settings (*Breaks on*,
@@ -231,7 +231,7 @@ One beat clock drives beat effects, auto-play and look timing (Settings > Tempo;
 Source: **Audio** locks to the music's own tempo and beat. It needs a few seconds to settle, then keeps steady time
 through quiet parts. If the beat feels twice too fast or too slow (drum & bass, trap), set *Feel* to Half time or
 Double. **Tap** (`T`, the TAP button or a MIDI pad),
-**Manual** BPM, or **MIDI clock** from a DAW (send clock to a MIDI port Lumoria can see; for a DAW on this PC a
+**Manual** BPM, or **MIDI clock** from a DAW (send clock to a MIDI port LumaTRX can see; for a DAW on this PC a
 virtual port such as loopMIDI; Start = beat 1). **Beat 1**: press `B`, the **1** key beside TAP, or a MIDI pad on
 the music's downbeat to make that beat beat 1 of the bar; a look's timeline moves with it, so its bars stay the
 music's bars (timelines also start on the nearest beat 1). Transition times,
@@ -403,7 +403,7 @@ Effects are GLSL fragment shaders in `effects.py`; add a dict to `EFFECTS` (and 
 and it shows up in the library with its sliders and dropdowns.
 
 ## Building from source
-Lumoria is Python. With Python 3.14 (64-bit) on Windows:
+LumaTRX is Python. With Python 3.14 (64-bit) on Windows:
 
 ```
 python -m venv .venv
@@ -414,22 +414,22 @@ python -m venv .venv
 (`run.bat` starts it too.) Running from source keeps looks and settings in the project folder (`presets/`,
 `ui_settings.json`, `midi_map.json`), which `.gitignore` keeps out of git.
 
-`.venv\Scripts\pip install pyinstaller` and then `.venv\Scripts\python build.py` build `dist\Lumoria\Lumoria.exe`
-(PyInstaller) and, if Inno Setup 6 is installed, `installer\Lumoria-Setup-<version>.exe` (Start menu, optional
+`.venv\Scripts\pip install pyinstaller` and then `.venv\Scripts\python build.py` build `dist\LumaTRX\LumaTRX.exe`
+(PyInstaller) and, if Inno Setup 6 is installed, `installer\LumaTRX-Setup-<version>.exe` (Start menu, optional
 desktop icon, uninstaller; no admin needed). The version is `VERSION` in `shared.py`. The installed app keeps
-looks, settings and MIDI links in `%APPDATA%\Lumoria` (kept on uninstall). Check a build with `Lumoria.exe --selftest`: it runs a few seconds with the AI mask, an effect and Spout
-on, writes `%TEMP%\LumoriaSelftest\selftest.json`, and quits, without touching your own looks.
+looks, settings and MIDI links in `%APPDATA%\LumaTRX` (kept on uninstall). Check a build with `LumaTRX.exe --selftest`: it runs a few seconds with the AI mask, an effect and Spout
+on, writes `%TEMP%\LumaTRXSelftest\selftest.json`, and quits, without touching your own looks.
 
 Tests: `.venv\Scripts\python -m unittest discover tests` runs the automated checks (safe saving, look and playlist
 imports including damaged and hostile files, crop cleaning, background removal recovering from errors). They run on
 a throwaway data folder, never your own looks.
 
 ## License
-Lumoria is open source under the [GNU General Public License v3.0](LICENSE): you can use it, share it, change
+LumaTRX is open source under the [GNU General Public License v3.0](LICENSE): you can use it, share it, change
 it and sell it, as long as what you pass on stays under the same licence with its source available. The AI mask
 model (Robust Video Matting, see `models/README.md`) is GPL-3.0; the x264 encoder bundled through PyAV is GPL;
-everything else Lumoria builds on is under permissive licences (listed in Settings > About).
+everything else LumaTRX builds on is under permissive licences (listed in Settings > About).
 
 ## Support
-Lumoria is made by one person. If it's part of your shows or streams, buying the installer or a tip helps keep
+LumaTRX is made by one person. If it's part of your shows or streams, buying the installer or a tip helps keep
 it going.

@@ -35,7 +35,7 @@ class ImportTest(unittest.TestCase):
         self.patch.stop()
         self.dir.cleanup()
 
-    def write(self, data, name="in.lumoria-playlist"):
+    def write(self, data, name="in.lumatrx-playlist"):
         path = os.path.join(self.dir.name, name)
         with open(path, "w") as fh:
             fh.write(data if isinstance(data, str) else json.dumps(data))
@@ -43,7 +43,7 @@ class ImportTest(unittest.TestCase):
 
     def test_good_playlist(self):
         ok, png = cv2.imencode(".png", np.zeros((36, 64, 3), np.uint8))
-        path = self.write(dict(lumoria="playlist", version=1, looks=[
+        path = self.write(dict(lumatrx="playlist", version=1, looks=[
             dict(name="Neon", look=dict(version=2, effects=[dict(id="glow", on=True, amt=0.5)]),
                  thumb=base64.b64encode(png.tobytes()).decode(), meta=dict(transition=1, hold=8))]))
         added = L.App.import_looks(self.app, path)
@@ -53,7 +53,7 @@ class ImportTest(unittest.TestCase):
         self.assertEqual(self.app.look_meta["Neon"]["hold"], 8.0)
 
     def test_hostile_and_broken_entries(self):
-        path = self.write(dict(lumoria="playlist", looks=[
+        path = self.write(dict(lumatrx="playlist", looks=[
             "nonsense",
             dict(name="../../evil", look=dict(effects=[dict(id="glow")]), thumb="!!notbase64",
                  meta=dict(transition="x")),
@@ -68,13 +68,38 @@ class ImportTest(unittest.TestCase):
     def test_not_a_look_file(self):
         for data in ("[1, 2, 3]", '"text"', '{"hello": 1}', "{broken json"):
             with self.assertRaises(ValueError):
-                L.App.import_looks(self.app, self.write(data, "x.lumoria-look"))
+                L.App.import_looks(self.app, self.write(data, "x.lumatrx-look"))
 
     def test_names_never_overwrite(self):
-        look = dict(lumoria="look", name="Same", look=dict(effects=[dict(id="glow")]))
-        L.App.import_looks(self.app, self.write(look, "a.lumoria-look"))
-        L.App.import_looks(self.app, self.write(look, "b.lumoria-look"))
+        look = dict(lumatrx="look", name="Same", look=dict(effects=[dict(id="glow")]))
+        L.App.import_looks(self.app, self.write(look, "a.lumatrx-look"))
+        L.App.import_looks(self.app, self.write(look, "b.lumatrx-look"))
         self.assertEqual(self.app.playlist, ["Same", "Same (2)"])
+
+    def test_files_from_before_the_rename_open(self):
+        """LumaTRX was called Lumoria: its .lumoria-look / .lumoria-playlist files (marked "lumoria") still import."""
+        look = dict(lumoria="look", name="Old look", look=dict(effects=[dict(id="glow")]))
+        self.assertEqual(L.App.import_looks(self.app, self.write(look, "old.lumoria-look")), ["Old look"])
+        pl = dict(lumoria="playlist", looks=[dict(name="Old list", look=dict(effects=[dict(id="glow")]))])
+        self.assertEqual(L.App.import_looks(self.app, self.write(pl, "old.lumoria-playlist")), ["Old list"])
+
+
+class DataFolder(unittest.TestCase):
+    def test_the_old_data_folder_is_carried_over_once(self):
+        import shared
+        with tempfile.TemporaryDirectory() as root:
+            old, new = os.path.join(root, "Lumoria"), os.path.join(root, "LumaTRX")
+            os.makedirs(os.path.join(old, "presets"))
+            with open(os.path.join(old, "presets", "Mine.json"), "w") as fh:
+                fh.write("{}")
+            self.assertTrue(shared.carry_over_data(new, old))
+            self.assertTrue(os.path.exists(os.path.join(new, "presets", "Mine.json")))
+            self.assertTrue(os.path.exists(os.path.join(old, "presets", "Mine.json")))   # a copy: the old one stays
+            with open(os.path.join(new, "presets", "New.json"), "w") as fh:
+                fh.write("{}")
+            self.assertFalse(shared.carry_over_data(new, old))   # once only: never over the new folder
+            self.assertTrue(os.path.exists(os.path.join(new, "presets", "New.json")))
+            self.assertFalse(shared.carry_over_data(os.path.join(root, "x"), os.path.join(root, "none")))
 
 
 class CropTest(unittest.TestCase):

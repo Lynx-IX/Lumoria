@@ -8,12 +8,14 @@ build/
 dist/
 installer/
 
-# personal data: your looks, settings, MIDI links, crash log (the installed app keeps these in %APPDATA%\Lumoria)
+# personal data: your looks, settings, MIDI links, crash log (the installed app keeps these in %APPDATA%\LumaTRX)
 presets/
 ui_settings.json
 midi_map.json
 crash.log
 .running
+*.lumatrx-look
+*.lumatrx-playlist
 *.lumoria-look
 *.lumoria-playlist
 

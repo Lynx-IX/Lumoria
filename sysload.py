@@ -36,7 +36,7 @@ def gpu_by_engine(items, pid=None):
 class SysLoad:
     def __init__(self, every=1.0):
         self.cpu = self.gpu = None         # whole machine, percent
-        self.own_cpu = self.own_gpu = None   # Lumoria's own share
+        self.own_cpu = self.own_gpu = None   # LumaTRX's own share
         self.every = every
         self._stop = threading.Event()
         if os.name == "nt":

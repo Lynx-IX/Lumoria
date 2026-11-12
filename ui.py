@@ -1,4 +1,4 @@
-"""Lumoria interface: neon-on-black theme, top bar, sidebar of effect cards, preview, playlist panel."""
+"""LumaTRX interface: neon-on-black theme, top bar, sidebar of effect cards, preview, playlist panel."""
 import ctypes
 import json
 import math
@@ -693,7 +693,7 @@ def draw(app):
     imgui.set_next_window_pos(vp.pos)
     imgui.set_next_window_size(vp.size)
     imgui.push_style_var(imgui.StyleVar_.window_padding, V(0, 0))
-    imgui.begin("Lumoria", None, imgui.WindowFlags_.no_decoration | imgui.WindowFlags_.no_move
+    imgui.begin("LumaTRX", None, imgui.WindowFlags_.no_decoration | imgui.WindowFlags_.no_move
                 | imgui.WindowFlags_.no_saved_settings | imgui.WindowFlags_.no_bring_to_front_on_focus
                 | imgui.WindowFlags_.no_scrollbar | imgui.WindowFlags_.no_scroll_with_mouse)
     imgui.pop_style_var()
@@ -1269,27 +1269,27 @@ WELCOME_TIPS = [
     (fa.ICON_FA_LAYER_GROUP, "Make your own", "Effects: + Add effect, tweak the cards, then Save look."),
     (fa.ICON_FA_SLIDERS, "Play it with hardware", "MIDI learn (top bar): click a control, then move a knob or hit a pad."),
     (fa.ICON_FA_SHARE_NODES, "Send it to OBS", "Spout (top bar) with the Spout2 plugin, or Window Capture of "
-                                                 "'Lumoria Output'."),
+                                                 "'LumaTRX Output'."),
     (fa.ICON_FA_ROTATE_LEFT, "Experiment freely", "Ctrl+Z undoes any change. Themes, AI mask and MIDI are in "
                                                    "Settings, at the top left."),
 ]
 
 
 def welcome(app):
-    """The first-run window: what Lumoria is, pick a camera, a five-line tour, and the sample looks."""
+    """The first-run window: what LumaTRX is, pick a camera, a five-line tour, and the sample looks."""
     if app.held_session is not None:   # the "didn't close properly" question comes first
         return
     if not S.welcomed and not S.welcome_open:
         S.welcome_open = True
         if not app.playlist:   # a brand-new install: start with the samples in the playlist
             app.add_samples()
-        imgui.open_popup("Welcome to Lumoria")
+        imgui.open_popup("Welcome to LumaTRX")
     if not S.welcome_open:
         return
     vp = imgui.get_main_viewport()
     imgui.set_next_window_pos(V(vp.pos.x + vp.size.x / 2, vp.pos.y + vp.size.y / 2), 0, V(0.5, 0.5))
     imgui.set_next_window_size(V(sc(640), 0))
-    opened, _ = imgui.begin_popup_modal("Welcome to Lumoria", None,
+    opened, _ = imgui.begin_popup_modal("Welcome to LumaTRX", None,
                                         imgui.WindowFlags_.always_auto_resize | imgui.WindowFlags_.no_move
                                         | imgui.WindowFlags_.no_title_bar)
     if not opened:
@@ -1358,11 +1358,11 @@ def restore_prompt(app):
     """After an unexpected close: offer the last setup back, or a start with no effects (in case it caused it)."""
     if app.held_session is None:
         return
-    if not imgui.is_popup_open("Lumoria didn't close properly"):
-        imgui.open_popup("Lumoria didn't close properly")
+    if not imgui.is_popup_open("LumaTRX didn't close properly"):
+        imgui.open_popup("LumaTRX didn't close properly")
     vp = imgui.get_main_viewport()
     imgui.set_next_window_pos(V(vp.pos.x + vp.size.x / 2, vp.pos.y + vp.size.y / 2), 0, V(0.5, 0.5))
-    opened, _ = imgui.begin_popup_modal("Lumoria didn't close properly", None,
+    opened, _ = imgui.begin_popup_modal("LumaTRX didn't close properly", None,
                                         imgui.WindowFlags_.always_auto_resize | imgui.WindowFlags_.no_move)
     if not opened:
         return
@@ -1561,12 +1561,12 @@ def toggle_play(app):
 
 # ---------------------------------------------------------------- top bar
 
-LOGO = ("lumoria_symbol", "lumoria_symbol", "lumoria_wordmark")   # the original artwork
+LOGO = ("lumatrx_symbol", "lumatrx_symbol", "lumatrx_wordmark")   # the original artwork
 
 
 def brand_textures(ctx):
     """The logo as GPU textures, or None: the symbol for small spots (top bar), the same for large (welcome),
-    and the LUMORIA wordmark, from assets/*.png."""
+    and the LUMATRX wordmark, from assets/*.png."""
     if S.brand is None:
         texs = []
         for name in LOGO:
@@ -1615,9 +1615,9 @@ def top_bar(app):
     else:   # no artwork found: the name as text
         imgui.set_cursor_pos_y(sc(12))
         imgui.push_font(S.bold, 24)
-        imgui.text_colored(TEXT, "LUM")
+        imgui.text_colored(TEXT, "LUMA")
         imgui.same_line(0, 0)
-        imgui.text_colored(CYAN, "ORIA")
+        imgui.text_colored(CYAN, "TRX")
         imgui.pop_font()
         imgui.same_line(0, 10)
         imgui.set_cursor_pos_y(sc(20))
@@ -1739,7 +1739,7 @@ def draw_readout(app, p, rw, src_icon, label_, readout, loads):
     imgui.dummy(V(rw, bot - top))
     if imgui.is_item_hovered():
         lines = [] if label_ == app.source_label else [f"Source: {app.source_label}"]
-        own = lambda v: "" if v is None else f"  (Lumoria {v:.0f}%)"
+        own = lambda v: "" if v is None else f"  (LumaTRX {v:.0f}%)"
         lines += [f"{n}: {v:.0f}% of the whole computer{own(S.load.own_cpu if n == 'CPU' else S.load.own_gpu)}"
                   for n, v in loads]
         if loads:
@@ -1785,9 +1785,9 @@ def top_bar_items(app):
         (f"{fa.ICON_FA_TABLE_COLUMNS}  Flip", app.flip_preview, CYAN, "flip",
          "Flip preview [M]: selfie view for you only, never broadcast"),
         (f"{fa.ICON_FA_DISPLAY}  Output", app.out_win.visible, CYAN, "out",
-         "Show/hide the Lumoria Output window [O] (capture it in OBS)"),
+         "Show/hide the LumaTRX Output window [O] (capture it in OBS)"),
         (f"{fa.ICON_FA_SHARE_NODES}  Spout", app.spout is not None, CYAN, "spout",
-         "Share the output over Spout as 'Lumoria': full quality, straight from the GPU.\n"
+         "Share the output over Spout as 'LumaTRX': full quality, straight from the GPU.\n"
          "OBS: install the Spout2 plugin, then add a 'Spout2 Capture' source.\n"
          "Also works with Resolume, TouchDesigner, MadMapper and other Spout apps."),
         (f"{fa.ICON_FA_EXPAND}", False, CYAN, "fs", "Output fullscreen [F11]"),
@@ -1804,13 +1804,13 @@ def top_bar_items(app):
                      "or hit a pad. Click again to finish. Links are listed in Settings > MIDI."))
     if app.update_ready:
         items.insert(0, (f"{fa.ICON_FA_ROTATE}  Update ready - restart", True, MAGENTA, "upd",
-                         "Lumoria's code changed since it started. Click to relaunch with the new version\n"
+                         "LumaTRX's code changed since it started. Click to relaunch with the new version\n"
                          "(your current effects aren't kept - save a look first if you want them)."))
     return items
 
 
 def file_menu(app):
-    """File: looks in and out of Lumoria, and the things people expect to find there."""
+    """File: looks in and out of LumaTRX, and the things people expect to find there."""
     if neon_button(f"{fa.ICON_FA_FOLDER_OPEN}  File##filemenu", DIM, V(0, 0), flat=True):
         imgui.open_popup("##file")
         S.file_anchor = V(imgui.get_item_rect_min().x, imgui.get_item_rect_max().y + 4)
@@ -1869,7 +1869,7 @@ def settings_list(app):
             ("About", fa.ICON_FA_CIRCLE_INFO, about_section)]
 
 
-CREDITS = [   # what Lumoria is built with, and their licences (shown in Settings > About)
+CREDITS = [   # what LumaTRX is built with, and their licences (shown in Settings > About)
     ("Robust Video Matting (AI mask model)", "GPL-3.0"), ("ONNX Runtime + DirectML", "MIT"),
     ("Dear ImGui / imgui-bundle", "MIT"), ("ModernGL", "MIT"), ("GLFW / pyGLFW", "zlib / MIT"),
     ("PyOpenGL", "BSD"), ("OpenCV", "Apache-2.0"), ("NumPy", "BSD"), ("sounddevice / PortAudio", "MIT"),
@@ -1882,13 +1882,13 @@ CREDITS = [   # what Lumoria is built with, and their licences (shown in Setting
 
 def about_section():
     imgui.push_font(S.bold, 15)
-    imgui.text(f"Lumoria Visual FX Engine {VERSION}")
+    imgui.text(f"LumaTRX Visual FX Engine {VERSION}")
     imgui.pop_font()
     imgui.text_colored(DIM, "Live GPU visuals: effects, AI cut-outs, audio, MIDI, looks.")
     imgui.text_colored(DIM, "Open source under the GNU GPL v3.0: share it, change it, build on it.")
     if neon_button(f"{fa.ICON_FA_HAND_SPARKLES}  Show the welcome again##welcome", DIM, V(-1, 0)):
         S.welcomed = False
-    if SUPPORT_URL and neon_button(f"{fa.ICON_FA_HEART}  Support Lumoria##support", MAGENTA, V(-1, 0),
+    if SUPPORT_URL and neon_button(f"{fa.ICON_FA_HEART}  Support LumaTRX##support", MAGENTA, V(-1, 0),
                                    tip="Made by one person: a tip helps keep it going"):
         webbrowser.open(SUPPORT_URL)
     if SOURCE_URL and neon_button(f"{fa.ICON_FA_CODE}  Source code##source", DIM, V(-1, 0), tip=SOURCE_URL):
@@ -1959,7 +1959,7 @@ def midi_section(app):
     if imgui.is_item_hovered():
         imgui.set_tooltip("Tick a controller to light its linked buttons and pads to match: on / off switches,\n"
                           "the music note, paused automations, play, record and the current look.\n"
-                          "Lumoria sends the same note or CC the button sends (127 lit, 0 dark), which\n"
+                          "LumaTRX sends the same note or CC the button sends (127 lit, 0 dark), which\n"
                           "lights most controllers (e.g. the MIDI Mix). Leave synths and interfaces unticked.")
     imgui.text_colored(DIM, "Light the linked buttons on:")
     errors = {n: e for n, _h, e in app.midi_out.ports if e}
@@ -3872,7 +3872,7 @@ def output_section(app):
         os.startfile(app.rec_folder)
     imgui.spacing()
     imgui.text_colored(DIM, "OBS, best quality: Spout (top bar), then a\n'Spout2 Capture' source (Spout2 plugin).\n"
-                            "Or: Window Capture > Lumoria Output\n"
+                            "Or: Window Capture > LumaTRX Output\n"
                             "Virtual cam: Discord, Zoom, browsers.\nOutput window: double-click = fullscreen.")
 
 
@@ -4273,7 +4273,7 @@ def tempo_section(app):
         imgui.set_tooltip("Audio: follows the bass of the audio input, steady through quiet parts\n"
                           "Tap: tap a few times on the beat (T, the TAP button or a MIDI pad)\n"
                           "Manual: the BPM below\n"
-                          "MIDI clock: follows your DAW's tempo (send MIDI clock to a port Lumoria can see)")
+                          "MIDI clock: follows your DAW's tempo (send MIDI clock to a port LumaTRX can see)")
     label("BPM")
     changed, bpm = slider_float("##bpm", tp.bpm, 40.0, 240.0, "%.1f")
     if changed:
@@ -4328,7 +4328,7 @@ def tempo_section(app):
     elif tp.source == tempo.MIDI_CLOCK:
         imgui.text_colored(CYAN if tp.clock_running else AMBER,
                            "Receiving MIDI clock." if tp.clock_running else
-                           "Waiting for MIDI clock: in your DAW, send MIDI clock to a MIDI port Lumoria can see "
+                           "Waiting for MIDI clock: in your DAW, send MIDI clock to a MIDI port LumaTRX can see "
                            "(for software on this PC, a virtual port such as loopMIDI). Start puts it on beat 1.")
     imgui.pop_text_wrap_pos()
 

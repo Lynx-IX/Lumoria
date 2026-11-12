@@ -1,4 +1,4 @@
-"""Build Lumoria for Windows: dist/Lumoria/Lumoria.exe (PyInstaller), then installer/Lumoria-Setup-<version>.exe
+"""Build LumaTRX for Windows: dist/LumaTRX/LumaTRX.exe (PyInstaller), then installer/LumaTRX-Setup-<version>.exe
 (Inno Setup, if it's installed). Run from this folder:  .venv\\Scripts\\python build.py
 """
 import os
@@ -17,7 +17,7 @@ ISCC = [os.path.join(os.environ.get(v, ""), r"Inno Setup 6\ISCC.exe")
 
 def pyinstaller():
     args = [sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean", "--onedir", "--windowed",
-            "--name", "Lumoria", "--icon", os.path.join(HERE, "assets", "lumoria.ico"),
+            "--name", "LumaTRX", "--icon", os.path.join(HERE, "assets", "lumatrx.ico"),
             "--distpath", "dist", "--workpath", "build", "--specpath", "build",
             "--add-data", f"{HERE}/assets;assets", "--add-data", f"{HERE}/models;models",
             "--add-data", f"{HERE}/samples;samples"]
@@ -31,12 +31,12 @@ def pyinstaller():
 def installer():
     iscc = next((p for p in ISCC if os.path.exists(p)), None)
     if not iscc:
-        print("Inno Setup not found: skipping the installer (dist\\Lumoria is ready to zip).")
+        print("Inno Setup not found: skipping the installer (dist\\LumaTRX is ready to zip).")
         return
-    subprocess.run([iscc, f"/DMyVersion={VERSION}", "lumoria.iss"], cwd=HERE, check=True)
+    subprocess.run([iscc, f"/DMyVersion={VERSION}", "lumatrx.iss"], cwd=HERE, check=True)
 
 
 if __name__ == "__main__":
-    shutil.rmtree(os.path.join(HERE, "dist", "Lumoria"), ignore_errors=True)
+    shutil.rmtree(os.path.join(HERE, "dist", "LumaTRX"), ignore_errors=True)
     pyinstaller()
     installer()

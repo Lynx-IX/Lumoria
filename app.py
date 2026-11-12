@@ -1,11 +1,11 @@
-"""Lumoria Visual FX Engine: real-time GPU video effects for OBS and friends.
+"""LumaTRX Visual FX Engine: real-time GPU video effects for OBS and friends.
 
-Control window (preview + settings) and a clean "Lumoria Output" window for OBS Window Capture.
+Control window (preview + settings) and a clean "LumaTRX Output" window for OBS Window Capture.
 Can also publish to the OBS Virtual Camera for Discord / Zoom / etc.
 """
 import sys
 
-if __name__ == "__main__" and "--record-worker" in sys.argv:   # Lumoria.exe as the recording helper (recorder.py)
+if __name__ == "__main__" and "--record-worker" in sys.argv:   # LumaTRX.exe as the recording helper (recorder.py)
     import recorder
     recorder.worker_main(sys.argv[sys.argv.index("--record-worker") + 1])
     raise SystemExit
@@ -53,7 +53,7 @@ PRESET_DIR = os.path.join(DATA, "presets")
 PLAYLIST_FILE = os.path.join(PRESET_DIR, "_playlist.json")
 MIDI_FILE = os.path.join(DATA, "midi_map.json")   # MIDI mappings (global, not per look)
 MIDI_OUT_FILE = os.path.join(DATA, "midi_out.json")   # which MIDI outputs get button lights (see midi_feedback)
-RUNNING_FILE = os.path.join(DATA, ".running")   # exists while Lumoria runs (see App.unclean)
+RUNNING_FILE = os.path.join(DATA, ".running")   # exists while LumaTRX runs (see App.unclean)
 VCAM_FPS = 60
 DEFAULT_COLOURS = [(1.0, 0.16, 0.6), (0.55, 0.2, 1.0), (0.0, 0.9, 1.0)]   # starting "Custom" palette
 
@@ -1110,11 +1110,11 @@ class Pipeline:
 # ---------------------------------------------------------------- outputs
 
 class OutputWindow:
-    """Borderless-capable window showing only the processed video. OBS: Window Capture -> 'Lumoria Output'."""
+    """Borderless-capable window showing only the processed video. OBS: Window Capture -> 'LumaTRX Output'."""
 
     def __init__(self, share):
         glfw.window_hint(glfw.AUTO_ICONIFY, False)  # stay up when fullscreen loses focus
-        self.win = glfw.create_window(960, 540, "Lumoria Output", None, share)
+        self.win = glfw.create_window(960, 540, "LumaTRX Output", None, share)
         glfw.make_context_current(self.win)
         glfw.swap_interval(0)  # the control window already syncs to vblank
         self.ctx = moderngl.create_context()
@@ -1245,7 +1245,7 @@ class App:
         self.res_idx = 0
         self.vcam, self.vcam_last = None, 0.0
         self.recorder = recorder.Recorder()
-        self.rec_folder = os.path.join(os.path.expanduser("~"), "Videos", "Lumoria")
+        self.rec_folder = os.path.join(os.path.expanduser("~"), "Videos", "LumaTRX")
         self.rec_format, self.rec_fps, self.rec_sound = 0, 60, True
         self.spout = None   # Spout sender while on (spout.SpoutSender)
         self.file_dialog = None   # (target: "main" or slot 0-2, kind "video"/"image", dialog)
@@ -1292,18 +1292,18 @@ class App:
         try:
             self.midi.open_all()
         except Exception as e:   # no MIDI system: the rest of the app doesn't need it
-            print(f"[Lumoria] MIDI unavailable: {e}", flush=True)
+            print(f"[LumaTRX] MIDI unavailable: {e}", flush=True)
         self.midi_map = self.load_midi_map()   # [{"src": [kind, channel, number], "target": [scope, key]}]
         self.midi_learn, self.learn_target, self.midi_seen, self.midi_cc = False, None, 0.0, {}
         # button lights: sent only to the outputs ticked in Settings > MIDI (a synth on another port never hears it)
         self.midi_out, self.lights_sent, self.out_names = midi.MidiOut(), {}, []
         self.light_ports = self.load_light_ports()
         self.rescan_midi_out()
-        # notice when Lumoria's own code changes on disk, so a stale copy doesn't keep running
+        # notice when LumaTRX's own code changes on disk, so a stale copy doesn't keep running
         self.code_stamp, self.code_check_t = code_stamp(), 0.0
         self.update_ready, self.restart_requested = False, False
         self.session_text, self.session_t = "", 0.0
-        # a marker file that exists only while Lumoria runs: still there at start = it didn't close properly
+        # a marker file that exists only while LumaTRX runs: still there at start = it didn't close properly
         self.unclean = os.path.exists(RUNNING_FILE)
         self.crash_note = self.last_crash() if self.unclean else ""
         self.held_session = None   # the last setup, waiting for "Restore?" after an unexpected close
@@ -1390,7 +1390,8 @@ class App:
             self.source_label = describe(desc)
 
     # --- sharing: looks and whole playlists as files (each look with its transition and timing)
-    LOOK_EXT, PLAYLIST_EXT = ".lumoria-look", ".lumoria-playlist"
+    LOOK_EXT, PLAYLIST_EXT = ".lumatrx-look", ".lumatrx-playlist"
+    OLD_LOOK_EXT, OLD_PLAYLIST_EXT = ".lumoria-look", ".lumoria-playlist"   # from before the rename: still open
 
     def look_package(self, name):
         with open(os.path.join(PRESET_DIR, name + ".json")) as fh:
@@ -1408,27 +1409,28 @@ class App:
         looks = [self.look_package(n) for n in names
                  if os.path.exists(os.path.join(PRESET_DIR, n + ".json"))]
         if names is not None and len(names) == 1 and looks:
-            data = dict(lumoria="look", version=1, **looks[0])
+            data = dict(lumatrx="look", version=1, **looks[0])
         else:
-            data = dict(lumoria="playlist", version=1, looks=looks)
+            data = dict(lumatrx="playlist", version=1, looks=looks)
         save_json(path, data)
         return len(looks)
 
     def import_looks(self, path):
-        """Add the look(s) in a .lumoria-look / .lumoria-playlist file to the end of the playlist. Names that are
+        """Add the look(s) in a .lumatrx-look / .lumatrx-playlist file to the end of the playlist. Names that are
         already taken get a number, so nothing of yours is overwritten. Returns the names added."""
         with open(path, encoding="utf8") as fh:
             data = json.load(fh)
         if not isinstance(data, dict):
-            raise ValueError("not a Lumoria look or playlist file")
-        if data.get("lumoria") == "look":
+            raise ValueError("not a LumaTRX look or playlist file")
+        kind = data.get("lumatrx", data.get("lumoria"))   # files from before the rename (Lumoria) open too
+        if kind == "look":
             looks = [data]
-        elif data.get("lumoria") == "playlist":
+        elif kind == "playlist":
             looks = data.get("looks", []) if isinstance(data.get("looks"), list) else []
         elif isinstance(data, dict) and "effects" in data:   # a bare look file from a presets folder
             looks = [dict(name=os.path.splitext(os.path.basename(path))[0], look=data, meta={})]
         else:
-            raise ValueError("not a Lumoria look or playlist file")
+            raise ValueError("not a LumaTRX look or playlist file")
         added = []
         for pkg in looks:
             if not isinstance(pkg, dict):
@@ -1459,7 +1461,7 @@ class App:
         self.save_playlist()
         return added
 
-    # sample looks shipped with Lumoria (samples/: look + thumbnail), in the order they're offered
+    # sample looks shipped with LumaTRX (samples/: look + thumbnail), in the order they're offered
     SAMPLES = ["Neon Lines", "Kaleido Dream", "Warp Speed", "Comic Book", "Matrix", "Old Film", "Ember Storm",
                "Glitch VHS"]
 
@@ -1484,15 +1486,16 @@ class App:
         """Save dialog for one look (names = [it]) or the playlist (None); the answer is handled in process."""
         one = names is not None and len(names) == 1
         ext = self.LOOK_EXT if one else self.PLAYLIST_EXT
-        default = os.path.join(os.path.expanduser("~"), "Documents", (names[0] if one else "Lumoria playlist") + ext)
-        kind = "Lumoria look" if one else "Lumoria playlist"
+        default = os.path.join(os.path.expanduser("~"), "Documents", (names[0] if one else "LumaTRX playlist") + ext)
+        kind = "LumaTRX look" if one else "LumaTRX playlist"
         self.share_dialog = ("export", pfd.save_file(f"Export {'look' if one else 'playlist'}", default,
                                                      [kind, "*" + ext]), (names, ext))
 
     def ask_import(self):
         self.share_dialog = ("import", pfd.open_file(
             "Import looks or a playlist", os.path.join(os.path.expanduser("~"), "Documents"),
-            ["Lumoria looks and playlists", f"*{self.LOOK_EXT} *{self.PLAYLIST_EXT}", "All files", "*"],
+            ["LumaTRX looks and playlists",
+             f"*{self.LOOK_EXT} *{self.PLAYLIST_EXT} *{self.OLD_LOOK_EXT} *{self.OLD_PLAYLIST_EXT}", "All files", "*"],
             pfd.opt.multiselect), None)
 
     def finish_share_dialog(self):
@@ -1567,7 +1570,7 @@ class App:
             self.toggle_vcam()
 
     def toggle_spout(self, on=None):
-        """Start or stop the Spout sender "Lumoria" (OBS with the Spout2 plugin, Resolume, TouchDesigner...)."""
+        """Start or stop the Spout sender "LumaTRX" (OBS with the Spout2 plugin, Resolume, TouchDesigner...)."""
         on = self.spout is None if on is None else on
         if not on and self.spout:
             self.spout.close()
@@ -1575,7 +1578,7 @@ class App:
         elif on and self.spout is None:
             try:
                 import spout
-                self.spout = spout.SpoutSender("Lumoria")
+                self.spout = spout.SpoutSender("LumaTRX")
             except Exception as e:
                 self.flash(f"Spout failed: {e}", 8)
 
@@ -1715,7 +1718,7 @@ class App:
             self.out_names = midi.list_out_ports()
             self.midi_out.open(self.light_ports)
         except Exception as e:   # no MIDI system: the rest of the app doesn't need it
-            print(f"[Lumoria] MIDI output unavailable: {e}", flush=True)
+            print(f"[LumaTRX] MIDI output unavailable: {e}", flush=True)
 
     def set_light_port(self, name, on):
         """Tick or untick an output port for button lights (Settings > MIDI); remembered by its name."""
@@ -2881,7 +2884,7 @@ class App:
         dev = next((d for d, n in self.audio_devs if n == name), None) if name else None
         if dev is not None:
             self.audio.open(dev, name)
-        if data.get("spout"):   # it was sending when Lumoria closed: OBS is probably expecting it
+        if data.get("spout"):   # it was sending when LumaTRX closed: OBS is probably expecting it
             self.toggle_spout(True)
         if m.get("quality", self.mask_quality) != self.mask_quality:
             self.set_mask_quality(min(m["quality"], len(SEG_QUALITY) - 1))
@@ -2904,7 +2907,7 @@ class App:
         def build(e):
             try:
                 return self.item_from_dict(e, by_id, used)
-            except Exception:   # something in this entry Lumoria can't use: leave it out, keep the rest
+            except Exception:   # something in this entry LumaTRX can't use: leave it out, keep the rest
                 return None
         chain = [it for it in (build(e) for e in entries) if it]
         for f in used:   # effects the new look reuses leave wherever they were in the old chain
@@ -3189,7 +3192,7 @@ _gl_errors_seen = set()
 
 
 def run_selftest(app, frame):
-    """Lumoria.exe --selftest: run a few seconds with the AI mask, an effect and Spout on, then write
+    """LumaTRX.exe --selftest: run a few seconds with the AI mask, an effect and Spout on, then write
     selftest.json (in the data folder) and quit. Proves a build has its DLLs, fonts, shaders and model."""
     if frame == 1:
         app.held_session = None
@@ -3208,12 +3211,12 @@ def run_selftest(app, frame):
                   recording=app.recorder.found, what_you_hear=selftest_loopback())
     info = app.pipe.ctx.info
     report.update(gpu=info.get("GL_RENDERER", "?"), gpu_vendor=info.get("GL_VENDOR", "?"),
-                  gl_version=info.get("GL_VERSION", "?"), lumoria_version=VERSION)
+                  gl_version=info.get("GL_VERSION", "?"), lumatrx_version=VERSION)
     with open(os.path.join(DATA, "selftest.json"), "w") as fh:
         json.dump(report, fh, indent=1)
-    if "--report" in sys.argv:   # the Start menu's "Lumoria Self-Test": a plain report to read and send back
+    if "--report" in sys.argv:   # the Start menu's "LumaTRX Self-Test": a plain report to read and send back
         ok = lambda v: "OK" if v else "FAILED"
-        lines = [f"Lumoria {VERSION} self-test", "",
+        lines = [f"LumaTRX {VERSION} self-test", "",
                  f"Graphics card:   {report['gpu']}  ({report['gpu_vendor']})",
                  f"OpenGL:          {report['gl_version']}",
                  f"Frame rate:      {report['fps']} fps",
@@ -3227,8 +3230,8 @@ def run_selftest(app, frame):
                  f"Recording:       {report['recording'] or 'FAILED (no H.264 encoder)' if report['recording'] is not None else 'not checked'}",
                  f"Fonts / logo:    {ok(report['font_ok'])} / {ok(report['logo_ok'])}",
                  f"MIDI inputs:     {', '.join(report['midi_ports']) or 'none'}", "",
-                 "Please send this to whoever gave you Lumoria. Thanks for testing!"]
-        path = os.path.join(DATA, "Lumoria self-test.txt")
+                 "Please send this to whoever gave you LumaTRX. Thanks for testing!"]
+        path = os.path.join(DATA, "LumaTRX self-test.txt")
         with open(path, "w", encoding="utf8") as fh:
             fh.write("\n".join(lines) + "\n")
         try:
@@ -3242,8 +3245,8 @@ _raised = set()
 
 
 def raise_dialogs():
-    """Bring Lumoria's open file dialogs in front once each. They open from a helper thread, so Windows can put
-    them behind Lumoria's own windows, where they're easy to miss while Lumoria waits for an answer."""
+    """Bring LumaTRX's open file dialogs in front once each. They open from a helper thread, so Windows can put
+    them behind LumaTRX's own windows, where they're easy to miss while LumaTRX waits for an answer."""
     if os.name != "nt":
         return
     user32, me = ctypes.windll.user32, os.getpid()
@@ -3285,9 +3288,9 @@ def selftest_loopback():
 
 
 def set_app_icon(win):
-    """Lumoria's icon (the original artwork) on a window's title bar and taskbar button."""
+    """LumaTRX's icon (the original artwork) on a window's title bar and taskbar button."""
     icons = {}
-    for key, name in (("small", "lumoria_icon"), ("big", "lumoria_icon")):
+    for key, name in (("small", "lumatrx_icon"), ("big", "lumatrx_icon")):
         img = cv2.imread(os.path.join(HERE, "assets", name + ".png"), cv2.IMREAD_UNCHANGED)
         if img is None or img.ndim != 3 or img.shape[2] != 4:
             return
@@ -3301,11 +3304,11 @@ def set_app_icon(win):
 
 def set_taskbar_icon(win):
     """The taskbar button's icon. Run from source, Windows would take it from the Python launcher, not the window,
-    so give the window Lumoria's app ID plus a relaunch command and icon (what a pinned button uses too). Must be
+    so give the window LumaTRX's app ID plus a relaunch command and icon (what a pinned button uses too). Must be
     set before the window is first shown."""
     if os.name != "nt":
         return
-    icon = os.path.join(HERE, "assets", "lumoria.ico")
+    icon = os.path.join(HERE, "assets", "lumatrx.ico")
     if FROZEN:
         command = f'"{sys.executable}"'
     else:
@@ -3340,7 +3343,7 @@ def set_taskbar_icon(win):
         release = ctypes.WINFUNCTYPE(ctypes.c_ulong, ctypes.c_void_p)(vtbl[2])
         app_model = guid("{9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3}")   # PKEY_AppUserModel_*
         texts = []
-        for pid, text in ((5, APP_ID), (2, command), (3, icon + ",0"), (4, "Lumoria")):
+        for pid, text in ((5, APP_ID), (2, command), (3, icon + ",0"), (4, "LumaTRX")):
             buf = ctypes.create_unicode_buffer(text)
             texts.append(buf)
             set_value(store, ctypes.byref(PROPERTYKEY(app_model, pid)),
@@ -3355,11 +3358,11 @@ def log_gl_errors(stage):
     while (err := GL.glGetError()) != GL.GL_NO_ERROR:
         if (stage, err) not in _gl_errors_seen:
             _gl_errors_seen.add((stage, err))
-            print(f"[Lumoria] OpenGL error {err} during {stage} (ignored, please report)", flush=True)
+            print(f"[LumaTRX] OpenGL error {err} during {stage} (ignored, please report)", flush=True)
 
 
 def code_stamp():
-    """Modification times of Lumoria's own source files (none when installed: it updates by reinstalling)."""
+    """Modification times of LumaTRX's own source files (none when installed: it updates by reinstalling)."""
     stamps = {}
     if FROZEN:
         return stamps
@@ -3372,7 +3375,7 @@ def code_stamp():
     return stamps
 
 
-APP_ID = "Lumoria.VisualFXEngine"
+APP_ID = "LumaTRX.VisualFXEngine"
 
 
 def main():
@@ -3388,7 +3391,7 @@ def main():
                     (glfw.OPENGL_PROFILE, glfw.OPENGL_CORE_PROFILE), (glfw.OPENGL_FORWARD_COMPAT, True)):
         glfw.window_hint(hint, v)
     glfw.window_hint(glfw.VISIBLE, False)   # shown once the taskbar knows its icon (set_taskbar_icon)
-    win = glfw.create_window(1600, 960, "Lumoria Visual FX Engine", None, None)
+    win = glfw.create_window(1600, 960, "LumaTRX Visual FX Engine", None, None)
     glfw.make_context_current(win)
     glfw.swap_interval(1)
 
@@ -3450,7 +3453,7 @@ def main():
         app.audio.tap = None
         app.recorder.close()   # finish the file properly and let the recording helper go
         if app.spout:
-            app.spout.close()   # unlists "Lumoria" so receivers don't wait for it
+            app.spout.close()   # unlists "LumaTRX" so receivers don't wait for it
         if app.vcam:
             app.vcam.close()
         if app.segmenter:
@@ -3465,7 +3468,7 @@ def main():
 if __name__ == "__main__":
     try:
         main()
-    except Exception:   # a relaunched Lumoria has no console, so keep the error somewhere findable
+    except Exception:   # a relaunched LumaTRX has no console, so keep the error somewhere findable
         import traceback
         with open(os.path.join(DATA, "crash.log"), "a", encoding="utf8") as fh:
             fh.write(f"\n--- {time.strftime('%Y-%m-%d %H:%M:%S')}\n{traceback.format_exc()}")

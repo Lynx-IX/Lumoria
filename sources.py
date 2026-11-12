@@ -394,7 +394,7 @@ def _cloaked(hwnd):
 
 
 def list_windows():
-    """[(hwnd, title, exe)] for open app windows, ours left out (capturing Lumoria into itself loops)."""
+    """[(hwnd, title, exe)] for open app windows, ours left out (capturing LumaTRX into itself loops)."""
     if not _user32:
         return []
     out, me = [], os.getpid()

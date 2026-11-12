@@ -1,5 +1,5 @@
 """Interface settings and themes, without opening a window: every theme sets every colour, and a settings file
-from an older Lumoria (with options since removed, like the logo style and header tint) still loads."""
+from an older LumaTRX (with options since removed, like the logo style and header tint) still loads."""
 import json
 import os
 import shutil

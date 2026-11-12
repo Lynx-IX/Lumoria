@@ -18,18 +18,35 @@ def save_text(path, text):
 def save_json(path, data):
     save_text(path, json.dumps(data, indent=1))
 
-# Installed (Lumoria.exe, built with PyInstaller): built-in files (assets, models) sit in the app's own folder,
-# which may be read-only (Program Files), so looks, settings, MIDI links and logs live in %APPDATA%\Lumoria.
+# Installed (LumaTRX.exe, built with PyInstaller): built-in files (assets, models) sit in the app's own folder,
+# which may be read-only (Program Files), so looks, settings, MIDI links and logs live in %APPDATA%\LumaTRX.
 # Run from source: both are this folder.
-VERSION = "0.11.0"   # Lumoria's version (build.py reads it from here for the installer)
+VERSION = "0.11.0"   # LumaTRX's version (build.py reads it from here for the installer)
 SOURCE_URL = "https://github.com/Lynx-IX/Lumoria"   # Settings > About links to it
 SUPPORT_URL = ""     # a tip / support page (Ko-fi); Settings > About shows a Support button once set
 FROZEN = getattr(sys, "frozen", False)
 HERE = getattr(sys, "_MEIPASS", "") if FROZEN else os.path.dirname(os.path.abspath(__file__))
-DATA = os.path.join(os.environ.get("APPDATA") or os.path.expanduser("~"), "Lumoria") if FROZEN else HERE
+DATA = os.path.join(os.environ.get("APPDATA") or os.path.expanduser("~"), "LumaTRX") if FROZEN else HERE
 if "--selftest" in sys.argv:   # the build check runs on a throwaway data folder, never the user's looks
     import tempfile
-    DATA = os.path.join(tempfile.gettempdir(), "LumoriaSelftest")
+    DATA = os.path.join(tempfile.gettempdir(), "LumaTRXSelftest")
+
+
+def carry_over_data(new, old):
+    """LumaTRX was called Lumoria: the first time it runs, it brings the old data folder's looks, settings and MIDI
+    links over (a copy - the old folder is left as it was, in case of second thoughts)."""
+    if os.path.exists(new) or not os.path.isdir(old):
+        return False
+    import shutil
+    try:
+        shutil.copytree(old, new)
+        return True
+    except OSError:
+        return False
+
+
+if FROZEN and "--selftest" not in sys.argv:
+    carry_over_data(DATA, os.path.join(os.path.dirname(DATA), "Lumoria"))
 os.makedirs(DATA, exist_ok=True)
 RESOLUTIONS = [("1280 x 720", 1280, 720), ("1920 x 1080", 1920, 1080),
                ("1080 x 1920  vertical", 1080, 1920), ("1080 x 1080  square", 1080, 1080),

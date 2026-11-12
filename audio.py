@@ -95,7 +95,7 @@ class AudioAnalyzer:
         self.sens = {k: float(v) for k in ("kick", "snare", "hat")}
 
     def set_sens(self, saved):
-        """Sensitivity from a saved session: one number (older Lumoria: all drums) or {drum: value}."""
+        """Sensitivity from a saved session: one number (older LumaTRX: all drums) or {drum: value}."""
         if isinstance(saved, (int, float)):
             self.hit_sens = min(1.0, max(0.0, float(saved)))
         elif isinstance(saved, dict):

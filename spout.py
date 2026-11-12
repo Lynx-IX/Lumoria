@@ -142,7 +142,7 @@ def _release(obj):
 class SpoutSender:
     """Publishes our output texture as a Spout sender. Call send() each frame with the GL context current."""
 
-    def __init__(self, name="Lumoria"):
+    def __init__(self, name="LumaTRX"):
         self.name, self.size, self.error = name, None, None
         self.device = self.context = self.texture = None
         self.gl_dev = self.gl_obj = None
@@ -205,7 +205,7 @@ class SpoutSender:
         self.wglDXUnlockObjectsNV(self.gl_dev, 1, ctypes.byref(h_))
         # publish: our description, and our name in the list of senders
         info = SharedTextureInfo((share.value or 0) & 0xFFFFFFFF, w, h, DXGI_FORMAT_B8G8R8A8_UNORM, 0,
-                                 "Lumoria Visual FX Engine", 0)
+                                 "LumaTRX Visual FX Engine", 0)
         self.info_mem = SharedMemory(self.name, ctypes.sizeof(SharedTextureInfo))
         with self.info_mem:
             self.info_mem.write(bytes(info))

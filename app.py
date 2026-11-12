@@ -2869,12 +2869,9 @@ def selftest_loopback():
 
 
 def set_app_icon(win):
-    """Lumoria's icon on a window's title bar and taskbar button. Neon styles: the bolder small tile up to 32 px, the full tile
-    above, in the Neon logo styles; the original artwork otherwise (Settings > Interface > Logo)."""
-    neon = ui.S.logo_look in (1, 2)
+    """Lumoria's icon (the original artwork) on a window's title bar and taskbar button."""
     icons = {}
-    for key, name in (("small", "lumoria_icon_neon_small" if neon else "lumoria_icon"),
-                      ("big", "lumoria_icon_neon" if neon else "lumoria_icon")):
+    for key, name in (("small", "lumoria_icon"), ("big", "lumoria_icon")):
         img = cv2.imread(os.path.join(HERE, "assets", name + ".png"), cv2.IMREAD_UNCHANGED)
         if img is None or img.ndim != 3 or img.shape[2] != 4:
             return
@@ -2892,8 +2889,7 @@ def set_taskbar_icon(win):
     set before the window is first shown."""
     if os.name != "nt":
         return
-    neon = ui.S.logo_look in (1, 2)
-    icon = os.path.join(HERE, "assets", "lumoria_neon.ico" if neon else "lumoria.ico")
+    icon = os.path.join(HERE, "assets", "lumoria.ico")
     if FROZEN:
         command = f'"{sys.executable}"'
     else:

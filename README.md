@@ -78,10 +78,13 @@ They live in `samples/`; the welcome (Settings > About > Show the welcome again)
 ## The layout
 - **Top bar:** *File* (new, save, import, export, recordings folder, shortcuts) and *Settings* at the left; the
   readout in the centre (source, resolution, fps, CPU and GPU load); keys for MIDI learn, Rec, Flip (preview only),
-  Output window, Spout, fullscreen and Virtual cam at the right.
+  Output window, Spout, fullscreen and Virtual cam at the right. In a narrower window the bar gets taller instead of
+  cutting things off: the readout moves to the right-hand corner with the keys under it; narrower still, the keys
+  become small icon keys (hover one for its name) stacked in rows in the corner, and the source's name in the readout
+  is shortened.
 - **Sidebar:** Input, Audio, Effects, Transitions, Output.
 - **Effects:** *+ Add effect* opens the library (searchable, grouped). Each effect in the chain is a card:
-  drag the grip to reorder, power to bypass, the **music note** turns listening on (lit) or off (dim; off, the
+  drag it by its grip or its name to reorder, power to bypass, the **music note** turns listening on (lit) or off (dim; off, the
   music doesn't touch the effect at all),
   the arrow opens its settings (amount, opacity, blend mode, centre, speed and its own options), × removes it.
   The ⧉ button (or right-click > *Duplicate*) adds an independent copy ("Neon Edges 2") with the same settings,
@@ -90,11 +93,18 @@ They live in `samples/`; the welcome (Settings > About > Show the welcome again)
   list of the whole chain in order: power, name, mode, pin and remove on each row, with a thin live amount line.
   Click a row to open that effect: beside the list when the sidebar is wide (the list stays in view and scrolls
   on its own), or right under its row when it's narrow (*Interface → Open effects* forces either). It closes the one before (Shift-click, or the pin on a row, keeps
-  several open; *Interface → Opening one* can make "keeps others" the default). Drag a row to reorder, right-click
-  for the card menu, number keys still follow the list order. Groups show with their effects indented under them.
+  several open; *Interface → Opening one* can make "keeps others" the default). Drag a row (by its grip or anywhere
+  on it) to reorder, right-click for the card menu, number keys still follow the list order. Groups show with their
+  effects indented under them.
+- **Reordering effects:** while you drag, the effect lifts out and the others slide aside to open a gap where it will
+  land; let go anywhere and it drops into that gap (Esc cancels). In the outline, where a group's rows end, drag a
+  little to the right to land at the end of the group, or to the left to land after it; dropping just under an empty
+  group's row puts it inside. On cards, drop on a group card's middle to put the effect in it (the group lights up).
+  The list scrolls when you drag near its top or bottom.
 - **Playlist (bottom):** saved looks as tiles. A look is a snapshot of the whole effect chain: build one in the
   sidebar, then press **Save look** (or the **+ Save current look** tile). Click a tile to fire it (with the current
-  transition), drag to reorder, right-click to overwrite or delete. Play runs through the playlist (or random looks)
+  transition), drag to reorder; the ▾ key in a tile's lower-right corner (or right-clicking the tile) opens its menu:
+  cue, transition, overwrite, export, update thumbnail, delete. Play runs through the playlist (or random looks)
   every N seconds or beats. Switching looks (by clicking or auto-play) is a real crossfade: the old look keeps
   running while the new one comes in. The sidebar's *Transitions* sets the default; right-click a tile >
   *Transition* to give a look its own (Dissolve / Grow / Cut / Wipe / Flash) and its own transition time, plus an
@@ -122,16 +132,16 @@ They live in `samples/`; the welcome (Settings > About > Show the welcome again)
   back on the next launch, including after *Update ready - restart*. Save a look to keep a setup permanently.
 - **Resizing:** drag the lines between panels; *Interface → UI size* (or Ctrl + mouse wheel) scales all text and
   controls. The layout is remembered in `ui_settings.json`.
-- **Themes:** *Settings → Interface → Theme* picks a theme (Console, Neon, Midnight, Analog, Carbon), and
-  *Lights* the main light colour.
-- **Logo:** *Interface → Logo* switches between *Original* (the glossy artwork, the default), *Neon* (a redrawn
-  crisp version with a white wordmark) and *Neon colour* (gradient wordmark); the window icon follows after a restart.
+- **Themes:** *Settings → Interface → Theme* picks a theme (Console, Neon, Midnight, Analog, Carbon, Forest,
+  Phosphor, Ember, Plum), and *Lights* the main light colour. A card that's on tints its header strip with a little
+  of its light colour (blue manual, amber audio, violet wave and groups).
 
 ## Logo files
 `assets/svg/` holds the Neon logo as vector art: the symbol with glow, flat and one-colour, the app icon tile (and a bolder
 small one for 16-32 px), and the wordmark in white and gradient. `python assets/make_logo.py` draws them all from one
 set of shapes and renders them as `assets/*_neon.*`. The original artwork keeps the plain names (`lumoria.ico`,
-`lumoria_icon.png`, ...) and is what the installer uses.
+`lumoria_icon.png`, ...) and is what Lumoria (top bar, welcome, window and taskbar icon) and the installer use; the
+Neon set is kept as artwork only.
 
 ## Audio react
 Pick an input under *Audio* (it's remembered for next time). To follow music playing on the PC, pick an output

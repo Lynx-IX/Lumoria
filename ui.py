@@ -93,6 +93,46 @@ THEMES = {
         GROOVE="#2a2a2a", SCROLL="#262626", SCROLL_HI="#333333", SCROLL_ACT="#444444", LENS="#0a0a0a",
         SEG_OFF="#181818", LCD_BG="#030303", LCD="#ff5c5c", BEZEL="#020202", TOAST="#111111",
         CYAN="#ff3b3b", MAGENTA="#f2f2f2", VIOLET="#b38cff", RED="#ff3b3b"),
+    "Forest": dict(   # deep green lacquer and moss, pale sage legends, green and gold lights
+        BG="#060b08", PANEL="#0d1510", CARD="#121c16", CARD_ON="#15211a", GROUP_BG="#101913",
+        FRAME="#070d09", FRAME_HI="#0c140f", FRAME_ACT="#111b14", BORDER="#22362a", TEXT="#e2efe5",
+        DIM="#7f9a87", NAME_ON="#f2fbf4", KEY_TEXT="#c6d9cb", EDGE_HI="#2f4a39", EDGE_LO="#020503",
+        KEY_TOP="#1c2c22", KEY_BOT="#141f18", KEY_HOV="#243829", STRIP_ON_TOP="#26402f", STRIP_ON_BOT="#1b2e22",
+        STRIP_TOP="#1a281f", STRIP_BOT="#141f18", STRIP_EDGE="#3d6149", TOPBAR_TOP="#132019", POPUP="#101a13",
+        HEAD="#1a2a20", HEAD_HI="#203327", HEAD_ACT="#273d2f", GRAB="#a9c9b2", GRAB_ACT="#e6f7ea",
+        GROOVE="#22362a", SCROLL="#1f3125", SCROLL_HI="#2b4433", SCROLL_ACT="#3a5c45", LENS="#080e0a",
+        SEG_OFF="#141f18", LCD_BG="#030704", LCD="#8dffb0", BEZEL="#030604", TOAST="#0f1912",
+        CYAN="#3ddc84", MAGENTA="#ffc23d", VIOLET="#5ad1c8", RED="#ff5a4a"),
+    "Phosphor": dict(   # an old green-screen terminal: black glass, green glow everywhere
+        BG="#030603", PANEL="#081008", CARD="#0c160c", CARD_ON="#0f1b0f", GROUP_BG="#0a130a",
+        FRAME="#040904", FRAME_HI="#081108", FRAME_ACT="#0c180c", BORDER="#1b3a1b", TEXT="#c8ffc8",
+        DIM="#5f9a5f", NAME_ON="#e6ffe6", KEY_TEXT="#a9e8a9", EDGE_HI="#245024", EDGE_LO="#000200",
+        KEY_TOP="#132613", KEY_BOT="#0d1a0d", KEY_HOV="#1a331a", STRIP_ON_TOP="#1c3a1c", STRIP_ON_BOT="#132813",
+        STRIP_TOP="#122212", STRIP_BOT="#0d190d", STRIP_EDGE="#2f6a2f", TOPBAR_TOP="#0b170b", POPUP="#091209",
+        HEAD="#112211", HEAD_HI="#172e17", HEAD_ACT="#1d3a1d", GRAB="#7dff7d", GRAB_ACT="#d9ffd9",
+        GROOVE="#0f3a1a", SCROLL="#163016", SCROLL_HI="#1f421f", SCROLL_ACT="#33ff66", LENS="#050a05",
+        SEG_OFF="#0d190d", LCD_BG="#020502", LCD="#66ff66", BEZEL="#010301", TOAST="#091209",
+        CYAN="#33ff66", MAGENTA="#d4ff3d", VIOLET="#3dffd0", RED="#ff4a3d"),
+    "Ember": dict(   # oxblood and charcoal, warm legends, red and orange lights
+        BG="#0c0606", PANEL="#160c0c", CARD="#1d1111", CARD_ON="#221313", GROUP_BG="#190e0e",
+        FRAME="#0e0707", FRAME_HI="#150a0a", FRAME_ACT="#1c0e0e", BORDER="#3a2020", TEXT="#f5e6e2",
+        DIM="#a3807a", NAME_ON="#fff3f0", KEY_TEXT="#e0c8c3", EDGE_HI="#4f2b2b", EDGE_LO="#040101",
+        KEY_TOP="#2e1818", KEY_BOT="#211111", KEY_HOV="#3a1f1f", STRIP_ON_TOP="#43221f", STRIP_ON_BOT="#311816",
+        STRIP_TOP="#2b1616", STRIP_BOT="#211111", STRIP_EDGE="#6a3530", TOPBAR_TOP="#1f1010", POPUP="#1a0e0e",
+        HEAD="#2a1515", HEAD_HI="#341a1a", HEAD_ACT="#3e2020", GRAB="#d6b0a8", GRAB_ACT="#fbe8e3",
+        GROOVE="#3a2020", SCROLL="#331c1c", SCROLL_HI="#462626", SCROLL_ACT="#5e3330", LENS="#0f0808",
+        SEG_OFF="#211111", LCD_BG="#080303", LCD="#ff9a6a", BEZEL="#060202", TOAST="#1a0e0e",
+        CYAN="#ff6a3d", MAGENTA="#ffc04d", VIOLET="#ff5c8a", RED="#ff3b3b"),
+    "Plum": dict(   # aubergine panels, lavender legends, pink and violet lights
+        BG="#09060c", PANEL="#120c17", CARD="#18111f", CARD_ON="#1c1424", GROUP_BG="#150f1b",
+        FRAME="#0a070d", FRAME_HI="#110b15", FRAME_ACT="#170f1d", BORDER="#33233f", TEXT="#efe6f5",
+        DIM="#9581a3", NAME_ON="#fbf4ff", KEY_TEXT="#d6c8e0", EDGE_HI="#46305a", EDGE_LO="#030104",
+        KEY_TOP="#281a32", KEY_BOT="#1c1324", KEY_HOV="#33213f", STRIP_ON_TOP="#3a2549", STRIP_ON_BOT="#2a1b35",
+        STRIP_TOP="#25182e", STRIP_BOT="#1c1324", STRIP_EDGE="#5c3d74", TOPBAR_TOP="#1a1121", POPUP="#160f1c",
+        HEAD="#24182d", HEAD_HI="#2d1e38", HEAD_ACT="#362444", GRAB="#c9b3d9", GRAB_ACT="#f4eafb",
+        GROOVE="#33233f", SCROLL="#2d1f38", SCROLL_HI="#3d2a4c", SCROLL_ACT="#523866", LENS="#0d0911",
+        SEG_OFF="#1c1324", LCD_BG="#050307", LCD="#f0a6ff", BEZEL="#040205", TOAST="#160f1c",
+        CYAN="#ff5cc8", MAGENTA="#ffb05c", VIOLET="#a98cff", RED="#ff4a5c"),
 }
 # the primary light colour can also be picked on its own, over any theme ("Theme" = the theme's own)
 ACCENTS = [("Theme", None), ("Ice blue", "#5ec8ff"), ("Cyan", "#00f0ff"), ("Amber", "#ffa630"),
@@ -127,8 +167,8 @@ def music_toggle(f):
 TOPBAR_H, PLAYLIST_SHUT_H, LABEL_W, GAP = 54, 52, 96, 6   # GAP: draggable seam between panels
 SETTINGS_FILE = os.path.join(DATA, "ui_settings.json")
 LAYOUT_DEFAULTS = dict(sidebar_w=410.0, playlist_h=196.0, playlist_open=True, scale=1.0, card_cols=0,
-                       theme="Console", accent=0, header_tint=False, side_tab=0, welcomed=False,
-                       card_warnings=0, logo_look=0, fx_view=1, fx_keep=0, fx_layout=0, num_boxes=1, auto_buttons=1,
+                       theme="Console", accent=0, side_tab=0, welcomed=False,
+                       card_warnings=0, fx_view=1, fx_keep=0, fx_layout=0, num_boxes=1, auto_buttons=1,
                        layout=0, panels={}, panels_shut=[])
 CARD_MIN_W = 300   # auto grid: a new column of effect cards appears whenever this much more width fits
 CARD_MAX_W = 720   # an effect card never gets wider than this (long sliders are harder to set finely)
@@ -139,10 +179,8 @@ class _State:
     sidebar_w, playlist_h, playlist_open, scale = 410.0, 196.0, True, 1.0   # remembered layout
     card_cols = 0                  # effect card grid columns, 0 = auto from the sidebar width
     theme, accent = "Console", 0   # interface theme (THEMES) and light colour (ACCENTS index)
-    header_tint = False            # card headers take on a little of their LED colour
     card_warnings = 0              # "hidden by" notes on cards: 0 full text, 1 icon only, 2 off
     windows = []                   # the app's GLFW windows, for title bar colours (set by app.main)
-    logo_look = 0                  # 0 Original artwork, 1 Neon (redrawn, white wordmark), 2 Neon colour (gradient wordmark)
     side_tab = 0                   # sidebar tab: 0 Effects, 1 Settings
     welcomed = False               # the welcome window has been seen (Settings > About shows it again)
     welcome_open = False
@@ -176,6 +214,9 @@ class _State:
     settings_btn = None            # the Settings button's rect (min, max), for the drop-down to hang from
     file_anchor = None             # where the File menu opens (under its button)
     load = None                    # CPU / GPU load for the top bar readout (sysload.SysLoad, started on first use)
+    topbar_h = 0.0                 # the top bar's height last frame (taller when its keys stack)
+    rd = None                      # the effect being dragged to a new place in the chain (reorder_source)
+    rd_zones, rd_stack, rd_rects, rd_prev_rects = [], [], {}, {}   # this frame's lists and items, for the next
     flow_first = True              # Custom: the next flow() item starts the panel (no same_line before it)
 
 
@@ -359,13 +400,13 @@ def led(dl, centre, col, on=True, r=3.2):
 
 
 def header_strip(on, lamp=None):
-    """A card's title strip: a raised, shaded band across its top, ruled off from the controls below; with the
-    Tinted header option, a card that's on takes on a little of its LED colour `lamp`.
+    """A card's title strip: a raised, shaded band across its top, ruled off from the controls below; a card
+    that's on takes on a little of its LED colour `lamp`.
     Call right after begin_child, before the header row (whose height is sc(28))."""
     wp, ww = imgui.get_window_pos(), imgui.get_window_width()
     bot = imgui.get_cursor_screen_pos().y + sc(28) + 3
     top_c, bot_c = (STRIP_ON_TOP, STRIP_ON_BOT) if on else (STRIP_TOP, STRIP_BOT)
-    if on and lamp is not None and S.header_tint:
+    if on and lamp is not None:
         top_c, bot_c = mix_col(top_c, lamp, .22), mix_col(bot_c, lamp, .12)
     dl = imgui.get_window_draw_list()
     dl.add_rect_filled(V(wp.x + 1, wp.y + 1), V(wp.x + ww - 1, bot), u32(bot_c), 3, imgui.ImDrawFlags_.round_top)
@@ -632,6 +673,7 @@ def section(title, icon):
 
 def draw(app):
     S.app = app
+    reorder_begin_frame(app)
     shortcuts(app)
     vp = imgui.get_main_viewport()
     imgui.set_next_window_pos(vp.pos)
@@ -649,7 +691,7 @@ def draw(app):
         S.scale = min(1.6, max(0.7, round(S.scale + io.mouse_wheel * 0.05, 2)))
         save_layout()
 
-    tb = sc(TOPBAR_H)
+    tb = max(sc(TOPBAR_H), S.topbar_h)   # the top bar grows when a narrow window stacks its keys
     panel_flags = imgui.ChildFlags_.always_use_window_padding
     imgui.set_cursor_pos(V(0, 0))
     imgui.push_style_color(imgui.Col_.child_bg, PANEL)
@@ -675,6 +717,7 @@ def draw(app):
     welcome(app)
     delete_prompt(app)
     keys_sheet()
+    reorder_ghost()
 
     if S.pending_move:   # applied after drawing so lists don't change mid-loop
         uid, dest, index = S.pending_move
@@ -1449,17 +1492,15 @@ def toggle_play(app):
 
 # ---------------------------------------------------------------- top bar
 
-LOGO_SETS = [("lumoria_symbol", "lumoria_symbol", "lumoria_wordmark"),
-             ("lumoria_symbol_neon", "lumoria_symbol_neon_glow", "lumoria_wordmark_neon"),
-             ("lumoria_symbol_neon", "lumoria_symbol_neon_glow", "lumoria_wordmark_neon_gradient")]
+LOGO = ("lumoria_symbol", "lumoria_symbol", "lumoria_wordmark")   # the original artwork
 
 
 def brand_textures(ctx):
-    """The logo as GPU textures, or None: a crisp symbol for small spots (top bar), a glowing one for large
-    (welcome), and the LUMORIA wordmark, from assets/*.png in the chosen Settings > Interface > Logo."""
+    """The logo as GPU textures, or None: the symbol for small spots (top bar), the same for large (welcome),
+    and the LUMORIA wordmark, from assets/*.png."""
     if S.brand is None:
         texs = []
-        for name in LOGO_SETS[S.logo_look if 0 <= S.logo_look < len(LOGO_SETS) else 0]:
+        for name in LOGO:
             img = cv2.imread(os.path.join(HERE, "assets", name + ".png"), cv2.IMREAD_UNCHANGED)
             if img is None or img.ndim != 3 or img.shape[2] != 4:
                 S.brand = False
@@ -1526,86 +1567,147 @@ def top_bar(app):
         S.settings_open = S.settings_focus = not S.settings_open
     S.settings_btn = (imgui.get_item_rect_min(), imgui.get_item_rect_max())
     left_end = imgui.get_item_rect_max().x - imgui.get_window_pos().x
+    wp, W = imgui.get_window_pos(), imgui.get_window_width()
+    right_edge = W - 16
 
-    # right-hand status toggles (measured first: the readout is centred in the room between)
+    # the right-hand status keys, and the status readout (source, size, fps, CPU / GPU)
     items = top_bar_items(app)
-    pad = imgui.get_style().frame_padding.x
+    pad, gap = imgui.get_style().frame_padding.x, 8
     widths = [imgui.calc_text_size(t).x + pad * 2 for t, *_ in items]
-    right_x = imgui.get_window_width() - 16 - sum(widths) - 8 * (len(items) - 1)
-
-    # status readout: a recessed LCD window, centred on the window (or in the free room, when that's tighter)
+    keys_w = sum(widths) + gap * (len(items) - 1)
     src_icon = fa.ICON_FA_VIDEO if isinstance(app.source, CameraSource) else (
         fa.ICON_FA_BARCODE if app.source is None else fa.ICON_FA_FILM)
     w, h = app.pipe.size
     readout = f"{w}x{h}  {app.fps:>3} FPS"
-    label_ = app.source_label if len(app.source_label) <= 34 else app.source_label[:33] + "..."
     if S.load is None:
         S.load = sysload.SysLoad()
-    ld = S.load
-    loads = [(n, v) for n, v in (("CPU", ld.cpu), ("GPU", ld.gpu)) if v is not None]
-    load_text = "  ".join(f"{n} {v:>3.0f}%" for n, v in loads)
+    loads = [(n, v) for n, v in (("CPU", S.load.cpu), ("GPU", S.load.gpu)) if v is not None]
+    label_ = app.source_label if len(app.source_label) <= 34 else app.source_label[:33] + "..."
+    rw = readout_width(label_, readout, loads)
+
+    if left_end + 14 + rw + 14 + keys_w <= right_edge:
+        # wide: one row - the readout centred on the window (or in the free room, when that's tighter)
+        right_x = right_edge - keys_w
+        rx = max(left_end + 14, min(right_x - 14 - rw, (W - rw) / 2))
+        draw_readout(app, V(wp.x + rx, wp.y + sc(21) - 2), rw, src_icon, label_, readout, loads)
+        x = right_x
+        for i, item in enumerate(items):
+            top_bar_key(app, item, V(x, sc(12)), widths[i])
+            x += widths[i] + gap
+        S.topbar_h = sc(TOPBAR_H)
+        return
+
+    # narrower: the readout moves up into the right-hand corner and the keys go under it; when they no longer
+    # fit with their names they become small icon keys, stacked in rows in the corner
+    col_x, col_top = left_end + 14, sc(8)
+    if right_edge - col_x < sc(190):   # too tight beside the logo: the readout and keys get rows of their own
+        col_x, col_top = 16, sc(TOPBAR_H) - sc(4)
+    room = right_edge - col_x
+    full = app.source_label
+    n = len(full)
+    while rw > room and n > 4:   # shorten the source's name before anything else
+        n -= 2
+        label_ = full[:n].rstrip() + "..."
+        rw = readout_width(label_, readout, loads)
+    if rw > room:
+        label_ = ""
+        rw = readout_width(label_, readout, loads)
+    draw_readout(app, V(wp.x + right_edge - rw, wp.y + col_top), rw, src_icon, label_, readout, loads)
+    y = col_top + sc(27) + 4 + sc(6)
+    if keys_w <= room:
+        x = right_edge - keys_w
+        for i, item in enumerate(items):
+            top_bar_key(app, item, V(x, y), widths[i])
+            x += widths[i] + gap
+        bottom = y + imgui.get_frame_height()
+    else:
+        k, g = imgui.get_frame_height() + sc(4), 6
+        per_row = max(1, int((room + g) // (k + g)))
+        rows = [items[i:i + per_row] for i in range(0, len(items), per_row)]
+        for row in rows:
+            x = right_edge - len(row) * k - (len(row) - 1) * g
+            for item in row:
+                top_bar_key(app, item, V(x, y), k, icon_only=True)
+                x += k + g
+            y += k + g
+        bottom = y - g
+    S.topbar_h = max(sc(TOPBAR_H), bottom + sc(9))
+
+
+def readout_width(label_, readout, loads):
+    """How wide the top bar's readout is with this source name (and the loads, when there are any)."""
     imgui.push_font(S.mono, 16)
-    rw = imgui.calc_text_size(f"{src_icon}  {label_}").x + imgui.calc_text_size(readout).x + 46
-    lw_load = imgui.calc_text_size(load_text).x if loads else 0
-    imgui.pop_font()
+    rw = imgui.calc_text_size(readout).x + 46 + (imgui.calc_text_size(label_).x + 18 if label_ else 0)
     if loads:
-        rw += lw_load + 18
-    rx = max(left_end + 14, min(right_x - 14 - rw, (imgui.get_window_width() - rw) / 2))
-    imgui.same_line(rx)
-    p = imgui.get_cursor_screen_pos()
-    top, bot = p.y + sc(9) - 2, p.y + sc(36) + 2
+        rw += imgui.calc_text_size("  ".join(f"{n} {v:>3.0f}%" for n, v in loads)).x + 18
+    imgui.pop_font()
+    return rw
+
+
+def draw_readout(app, p, rw, src_icon, label_, readout, loads):
+    """The status readout: a recessed LCD window at screen point `p` (its top left), `rw` wide."""
+    top, bot = p.y, p.y + sc(27) + 4
     dl = imgui.get_window_draw_list()
     dl.add_rect_filled(V(p.x, top), V(p.x + rw, bot), u32(LCD_BG), 3)
     dl.add_rect(V(p.x, top), V(p.x + rw, bot), u32(EDGE_LO), 3)
     dl.add_line(V(p.x + 3, bot), V(p.x + rw - 3, bot), u32(EDGE_HI), 1)   # lit lower lip
+    imgui.push_font(S.mono, 16)
     ty = (top + bot - imgui.get_text_line_height()) / 2
     lcd = LCD
     dl.add_text(S.mono, 16 * S.scale, V(p.x + 12, ty), u32(alpha(lcd, .55)), src_icon)
-    dl.add_text(S.mono, 16 * S.scale, V(p.x + 34, ty), u32(lcd), label_)
-    imgui.push_font(S.mono, 16)
-    lw = imgui.calc_text_size(label_).x
+    x = p.x + 34
+    if label_:
+        dl.add_text(S.mono, 16 * S.scale, V(x, ty), u32(lcd), label_)
+        x += imgui.calc_text_size(label_).x + 18
+    dl.add_text(S.mono, 16 * S.scale, V(x, ty), u32(alpha(lcd, .7)), readout)
+    x += imgui.calc_text_size(readout).x + 18
+    for n, v in loads:   # CPU / GPU load: amber when the computer is nearly flat out
+        part = f"{n} {v:>3.0f}%"
+        dl.add_text(S.mono, 16 * S.scale, V(x, ty), u32(AMBER if v >= 85 else alpha(lcd, .7)), part)
+        x += imgui.calc_text_size(part + "  ").x
     imgui.pop_font()
-    dl.add_text(S.mono, 16 * S.scale, V(p.x + 34 + lw + 18, ty), u32(alpha(lcd, .7)), readout)
-    if loads:   # CPU / GPU load: amber when the computer is nearly flat out
-        imgui.push_font(S.mono, 16)
-        x = p.x + 34 + lw + 18 + imgui.calc_text_size(readout).x + 18
-        for n, v in loads:
-            part = f"{n} {v:>3.0f}%"
-            dl.add_text(S.mono, 16 * S.scale, V(x, ty), u32(AMBER if v >= 85 else alpha(lcd, .7)), part)
-            x += imgui.calc_text_size(part + "  ").x
-        imgui.pop_font()
-    imgui.dummy(V(rw, sc(36)))
-    if imgui.is_item_hovered() and loads:
+    imgui.set_cursor_screen_pos(V(p.x, top))
+    imgui.dummy(V(rw, bot - top))
+    if imgui.is_item_hovered():
+        lines = [] if label_ == app.source_label else [f"Source: {app.source_label}"]
         own = lambda v: "" if v is None else f"  (Lumoria {v:.0f}%)"
-        imgui.set_tooltip("\n".join(f"{n}: {v:.0f}% of the whole computer{own(ld.own_cpu if n == 'CPU' else ld.own_gpu)}"
-                                    for n, v in loads) + "\nThe same figures as Task Manager, once a second")
+        lines += [f"{n}: {v:.0f}% of the whole computer{own(S.load.own_cpu if n == 'CPU' else S.load.own_gpu)}"
+                  for n, v in loads]
+        if loads:
+            lines.append("The same figures as Task Manager, once a second")
+        if lines:
+            imgui.set_tooltip("\n".join(lines))
 
-    x = right_x
-    for i, (text, active, col, key, tip) in enumerate(items):
-        imgui.same_line(x)
-        imgui.set_cursor_pos_y(sc(12))
-        if neon_button(f"{text}##{key}", col, V(widths[i], 0), active, tip):
-            if key == "upd":
-                app.restart_requested = True
-            elif key == "flip":
-                app.flip_preview = not app.flip_preview
-            elif key == "out":
-                app.out_win.set_visible(not app.out_win.visible)
-            elif key == "fs":
-                app.out_win.set_visible(True)
-                app.out_win.toggle_fullscreen()
-            elif key == "spout":
-                app.toggle_spout()
-            elif key == "rec":
-                app.toggle_record()
-            elif key == "midi":
-                app.midi_learn, app.learn_target = not app.midi_learn, None
-            else:
-                app.toggle_vcam()
-        if key == "midi":   # activity light: flickers while MIDI is coming in
-            mn, mx = imgui.get_item_rect_min(), imgui.get_item_rect_max()
-            led(imgui.get_window_draw_list(), V(mx.x - 7, mn.y + 7), CYAN, glfw.get_time() - app.midi_seen < .12, 2.4)
-        x += widths[i] + 8
+
+def top_bar_key(app, item, pos, width, icon_only=False):
+    """One of the top bar's status keys at `pos` (window coordinates). icon_only: a small square key showing
+    just its symbol, with its name in the tooltip."""
+    text, active, col, key, tip = item
+    imgui.set_cursor_pos(pos)
+    if icon_only:
+        name = text.split("  ", 1)
+        text, tip = name[0], (f"{name[1]}\n{tip}" if len(name) > 1 else tip)
+    if neon_button(f"{text}##{key}", col, V(width, width if icon_only else 0), active, tip):
+        if key == "upd":
+            app.restart_requested = True
+        elif key == "flip":
+            app.flip_preview = not app.flip_preview
+        elif key == "out":
+            app.out_win.set_visible(not app.out_win.visible)
+        elif key == "fs":
+            app.out_win.set_visible(True)
+            app.out_win.toggle_fullscreen()
+        elif key == "spout":
+            app.toggle_spout()
+        elif key == "rec":
+            app.toggle_record()
+        elif key == "midi":
+            app.midi_learn, app.learn_target = not app.midi_learn, None
+        else:
+            app.toggle_vcam()
+    if key == "midi":   # activity light: flickers while MIDI is coming in
+        mn, mx = imgui.get_item_rect_min(), imgui.get_item_rect_max()
+        led(imgui.get_window_draw_list(), V(mx.x - 7, mn.y + 7), CYAN, glfw.get_time() - app.midi_seen < .12, 2.4)
 
 
 def top_bar_items(app):
@@ -1844,7 +1946,9 @@ def interface_section():
         save_layout()
     if imgui.is_item_hovered():
         imgui.set_tooltip("Console: graphite and metal   Neon: the original neon-on-black\n"
-                          "Midnight: navy and blue   Analog: warm vintage gear   Carbon: black stage desk")
+                          "Midnight: navy and blue   Analog: warm vintage gear   Carbon: black stage desk\n"
+                          "Forest: deep green and gold   Phosphor: green-screen terminal\n"
+                          "Ember: oxblood, red and orange   Plum: aubergine, pink and violet")
     label("Lights")
     changed, a = imgui.combo("##accent", S.accent, [n for n, _ in ACCENTS])
     if changed:
@@ -1902,25 +2006,6 @@ def interface_section():
     if imgui.is_item_hovered():
         imgui.set_tooltip("The amber notes on effect cards when a later effect hides them\n"
                           "Icon only: a small mark, hover it for the details")
-    label("Logo")
-    ls = segmented("logo", ("Original", "Neon", "Neon colour"), S.logo_look, VIOLET)
-    if ls != S.logo_look:
-        for tex, _ in S.brand or []:
-            tex.release()
-        S.logo_look, S.brand = ls, None   # reloads in the new style on the next frame
-        save_layout()
-    if imgui.is_item_hovered():
-        imgui.set_tooltip("The Lumoria logo in the top bar, welcome window and window icon (after a restart)\n"
-                          "Original: the glossy artwork   Neon: redrawn crisp light trails, white wordmark\n"
-                          "Neon colour: the same with a gradient wordmark")
-    label("Card headers")
-    tint = segmented("tint", ("Plain", "Tinted"), int(S.header_tint), CYAN) == 1
-    if tint != S.header_tint:
-        S.header_tint = tint
-        save_layout()
-    if imgui.is_item_hovered():
-        imgui.set_tooltip("Tinted: a card that's on takes on a little of its LED colour\n"
-                          "(blue = manual, amber = audio, violet = wave and groups)")
     label("UI size")
     _, pct = slider_float("##uiscale", S.scale * 100, 70, 160, "%.0f%%")
     S.scale = round(pct) / 100
@@ -2168,6 +2253,7 @@ def walk_items(items):
 
 
 def effects_section(app):
+    reorder_autoscroll()
     gap = 6
     w_small = sc(40)
     avail = imgui.get_content_region_avail().x
@@ -2261,7 +2347,7 @@ def outline_row(app, f, key, container, depth):
     icon_button(fa.ICON_FA_GRIP_VERTICAL, "grip", alpha(DIM, .7), size=V(sc(16), 0))
     if imgui.is_item_hovered():
         imgui.set_mouse_cursor(imgui.MouseCursor_.resize_all)
-    card_drag_source(f)
+    reorder_source(f, container)
     imgui.same_line()
     if power_button(f.on, accent, "Group on/off (fades)" if group else "Bypass on/off (fades)") \
             and not app.midi_learn:
@@ -2276,8 +2362,8 @@ def outline_row(app, f, key, container, depth):
         f.expanded = not f.expanded
         S.fx_shift = imgui.get_io().key_shift   # Shift keeps the others open
     imgui.pop_style_color(3)
+    reorder_source(f, container)   # the row itself can be dragged too
     card_menu(app, f, container)
-    card_drop_target(container, container.index(f))   # drop a row here to put it before this one
     mn = imgui.get_item_rect_min()
     dl = imgui.get_window_draw_list()
     ty = mn.y + (h - imgui.get_text_line_height()) / 2
@@ -2391,10 +2477,9 @@ def outline_view(app):
                           | imgui.ChildFlags_.always_use_window_padding)
         imgui.pop_style_var()
         imgui.pop_style_color()
-        for f, container, key, depth in flat:
-            outline_row(app, f, key, container, depth)
+        reorder_autoscroll()
+        outline_rows(app, flat, blocks=False)
         imgui.dummy(V(-1, sc(8)))
-        card_drop_target(app.pipe.order, None)   # drop here to send an effect to the end of the chain
         imgui.end_child()
         bevel(imgui.get_item_rect_min(), imgui.get_item_rect_max())
         imgui.same_line(0, 6)
@@ -2408,7 +2493,35 @@ def outline_view(app):
             imgui.text_colored(DIM, "Shift-click, or pin it, to keep several open.")
         imgui.end_child()
     else:
-        for f, container, key, depth in flat:   # each row is a one-line card, with its settings right under it
+        outline_rows(app, flat, blocks=True)
+        imgui.dummy(V(-1, sc(8)))
+    imgui.pop_style_color()
+
+
+def outline_rows(app, flat, blocks):
+    """The outline's rows in chain order (blocks: each with its open settings under it), leaving out the one being
+    dragged (and what's inside it), with the gap opening where it would land."""
+    zone_open("list", top=app.pipe.order)
+    hide, open_groups = None, []   # depth of a dragged group whose rows are skipped; groups whose rows we're in
+
+    def close_groups(depth):   # a group's rows end: its end gap (an effect dropped in at its end)
+        while open_groups and open_groups[-1][1] >= depth:
+            g, d = open_groups.pop()
+            for h, cur in gaps_here(g.children, None):
+                gap_box(h, d + 1, cur)
+
+    for f, container, key, depth in flat:
+        if hide is not None and depth > hide:
+            continue
+        hide = None
+        if dragging(f):
+            hide = depth
+            continue
+        close_groups(depth)
+        for h, cur in gaps_here(container, f.uid):
+            gap_box(h, depth, cur)
+        imgui.begin_group()
+        if blocks:   # each row is a one-line card, with its settings right under it
             imgui.push_style_color(imgui.Col_.child_bg, CARD_ON if f.expanded else CARD)
             imgui.push_style_var(imgui.StyleVar_.window_padding, V(6, 3))
             imgui.begin_child(f"orow_{f.uid}", V(-1, 0), imgui.ChildFlags_.borders | imgui.ChildFlags_.auto_resize_y
@@ -2422,57 +2535,272 @@ def outline_view(app):
                     group_card(app, f, key, container, show_children=False)
                 else:
                     draw_cards(app, [(f, container, key)])
-        imgui.dummy(V(-1, sc(8)))
-        card_drop_target(app.pipe.order, None)
-    imgui.pop_style_color()
+        else:
+            outline_row(app, f, key, container, depth)
+        imgui.end_group()
+        zone_item(f, container, depth, kind="list")
+        if is_group(f):
+            open_groups.append((f, depth))
+    close_groups(0)
+    for h, cur in gaps_here(app.pipe.order, None):
+        gap_box(h, 0, cur)
+    zone_close()
 
 
 def draw_items(app, items, top):
-    """Cards for one chain level: effects flow in a grid; a group takes a full row."""
+    """Cards for one chain level: effects flow in a grid; a group takes a full row. While an effect is dragged, it
+    is left out and a gap (a card-sized space) opens where it would land."""
     visible = [f for f in items if not f.removing]
     cols = card_columns()
     run = []
+    zone_open("grid", top=items)
+
+    def card(n, f):
+        if isinstance(f, tuple):   # the gap
+            gap_box(f[1], 0, f[2])
+        else:
+            effect_card(app, f, n, items)
 
     def flush():
+        nonlocal tables
         if not run:
             return
         if cols == 1 and imgui.get_content_region_avail().x <= sc(CARD_MAX_W):
             for n, f in run:
-                effect_card(app, f, n, items)
-        elif begin_card_table(f"cards{run[0][1].uid}", cols):
+                card(n, f)
+        elif begin_card_table(f"cards{id(items)}_{tables}", cols):   # the same id while cards move about (a new
+            # one would rebuild every card inside it, which shrinks the list for a frame and jumps its scroll)
             # masonry: card k goes in column k % cols, so chain order still reads left to right, and
             # each column stacks its own cards, so a short card never leaves a gap beside a tall one
             for c in range(cols):
                 imgui.table_next_column()
                 for n, f in run[c::cols]:
-                    effect_card(app, f, n, items)
+                    card(n, f)
             end_card_table()
+            tables += 1
         run.clear()
 
+    tables = 0   # the runs of cards between groups each get a table
     for i, f in enumerate(visible):
         n = i if top else None   # number keys work on the top level
+        for h, cur in gaps_here(items, f.uid, ease=False):
+            if S.rd["group"]:   # a group lands as a full row
+                flush()
+                gap_box(h, 0, cur)
+            else:
+                run.append((None, ("gap", h, cur)))
+        if dragging(f):
+            continue
         if is_group(f):
             flush()
             group_card(app, f, n, items)
         else:
             run.append((n, f))
+    for h, cur in gaps_here(items, None, ease=False):
+        if S.rd["group"]:
+            flush()
+            gap_box(h, 0, cur)
+        else:
+            run.append((None, ("gap", h, cur)))
     flush()
+    zone_close()
 
 
-def card_drag_source(f):
-    if imgui.begin_drag_drop_source():
-        imgui.set_drag_drop_payload_py_id("FX", f.uid)
-        imgui.text(f"{fa.ICON_FA_FOLDER if is_group(f) else fa.ICON_FA_LAYER_GROUP}  {f.name}")
-        imgui.end_drag_drop_source()
+# ---------------------------------------------------------------- reordering effects by dragging
+# Grab an effect by its grip or its name and drag: it lifts out of the list, the others close up behind it and
+# open a gap where it will land, and letting go anywhere puts it in that gap (Esc cancels). Each list drawn this
+# frame is a "zone" (its rect and its items' rects); the next frame works out the landing spot from them.
+
+def inside(p, r):
+    return r[0].x <= p.x <= r[1].x and r[0].y <= p.y <= r[1].y
 
 
-def card_drop_target(dest, index):
-    """Dropping a card here moves it into dest (a chain list) before index, or to the end if None."""
-    if imgui.begin_drag_drop_target():
-        payload = imgui.accept_drag_drop_payload_py_id("FX")
-        if payload is not None:
-            S.pending_move = (payload.data_id, dest, index)
-        imgui.end_drag_drop_target()
+def live_after(container, uid):
+    """The uid of the item after `uid` in container (skipping fading-out items and the one being dragged)."""
+    seen = False
+    for x in container:
+        if seen and not x.removing and not (S.rd and x.uid == S.rd["uid"]):
+            return x.uid
+        seen = seen or x.uid == uid
+    return None
+
+
+def gap_key(target):
+    return id(target[0]), target[1]
+
+
+def reorder_source(f, container):
+    """Call right after a grip or name item: dragging it (a little way) picks the effect up."""
+    if S.rd is None and imgui.is_item_active() and imgui.is_mouse_dragging(0, sc(6)):
+        r = S.rd_prev_rects.get(f.uid)
+        gh = min(r[1].y - r[0].y, sc(220)) if r else sc(34)
+        S.rd = dict(uid=f.uid, name=f.name, group=is_group(f), gh=gh, target=(container, None))
+        S.rd["target"] = (container, live_after(container, f.uid))
+        S.rd["gaps"] = {gap_key(S.rd["target"]): gh}   # the gap starts open where it was: nothing jumps
+
+
+def reorder_begin_frame(app):
+    """At the start of a frame: drop (mouse up) or cancel (Esc) the drag, else find where it would land now."""
+    zones, S.rd_zones, S.rd_stack = S.rd_zones, [], []
+    S.rd_prev_rects, S.rd_rects = S.rd_rects, {}
+    rd = S.rd
+    if rd is None:
+        return
+    if imgui.is_key_pressed(imgui.Key.escape) or app.pipe.find(rd["uid"]) is None:
+        S.rd = None
+        return
+    if not imgui.is_mouse_down(0):
+        dest, before = rd["target"]
+        index = next((k for k, x in enumerate(dest) if x.uid == before), None) if before is not None else None
+        if before is None or index is not None:
+            S.pending_move = (rd["uid"], dest, index)
+        S.rd = None
+        return
+    m = imgui.get_io().mouse_pos
+    hit = None
+    for z in zones:   # the innermost list under the mouse (a group's cards sit inside the chain's)
+        if inside(m, z["rect"]) and (hit is None or z["depth"] >= hit["depth"]):
+            hit = z
+    if hit is not None:
+        new = (pick_in_list if hit["kind"] == "list" else pick_in_grid)(m, hit)
+        if new is not None:
+            if new[1] == rd["uid"]:   # "before itself" is where it was
+                new = new[0], live_after(new[0], rd["uid"])
+            rd["target"] = new
+    cur, dt = gap_key(rd["target"]), min(.1, imgui.get_io().delta_time)
+    rd["gaps"].setdefault(cur, 0.0)
+    for k in list(rd["gaps"]):   # gaps ease open and shut, so the others glide aside
+        goal = rd["gh"] if k == cur else 0.0
+        rd["gaps"][k] += (goal - rd["gaps"][k]) * min(1.0, dt * 16)
+        if k != cur and rd["gaps"][k] < 0.5:
+            del rd["gaps"][k]
+
+
+def pick_in_list(m, z):
+    """Outline: the gap goes before the first row whose middle is below the mouse. Where a group's rows end, the
+    mouse's indent says whether it goes in at the end of that group or after it."""
+    es = [e for e in z["entries"] if not e.get("gap")]
+    k = next((k for k, e in enumerate(es) if (e["rect"][0].y + e["rect"][1].y) / 2 > m.y), len(es))
+    prev, nxt = (es[k - 1] if k else None), (es[k] if k < len(es) else None)
+    x0 = z["rect"][0].x + sc(24)
+    if prev is not None and prev["group"] and prev["empty"] and m.x > x0 + sc(14) * (prev["depth"] + 1):
+        return prev["children"], None
+    if prev is not None and prev["depth"] > (nxt["depth"] if nxt else 0) and m.x > x0 + sc(14) * prev["depth"]:
+        return prev["cont"], live_after(prev["cont"], prev["uid"])
+    if nxt is not None:
+        return nxt["cont"], nxt["uid"]
+    return z["top"], None
+
+
+def pick_in_grid(m, z):
+    """Cards: over a card's upper half the gap goes before it, its lower half after it. A group card: its header
+    strip before it, its foot after it, anywhere else into the group (at the end). Over the gap, it stays put."""
+    for e in z["entries"]:
+        if not inside(m, e["rect"]):
+            continue
+        if e.get("gap"):
+            return None
+        y, top, bot = m.y, e["rect"][0].y, e["rect"][1].y
+        if e["group"]:
+            if y - top <= min(sc(40), (bot - top) * .3):
+                return e["cont"], e["uid"]
+            if bot - y > min(sc(24), (bot - top) * .25):
+                return e["children"], None
+        elif y < (top + bot) / 2:
+            return e["cont"], e["uid"]
+        return e["cont"], live_after(e["cont"], e["uid"])
+    # in the empty space under a short column: after that column's last card
+    above = [e for e in z["entries"] if e["rect"][0].x <= m.x <= e["rect"][1].x and e["rect"][1].y <= m.y]
+    if above:
+        e = max(above, key=lambda e: e["rect"][1].y)
+        if not e.get("gap") and not e["group"]:
+            return e["cont"], live_after(e["cont"], e["uid"])
+    return None
+
+
+def zone_open(kind, top=None):
+    """Start a list of effects (kind "list" or "grid") whose items can be dropped between."""
+    imgui.begin_group()
+    S.rd_stack.append(dict(kind=kind, entries=[], top=top, depth=len(S.rd_stack)))
+
+
+def zone_close():
+    imgui.end_group()
+    z = S.rd_stack.pop()
+    z["rect"] = (imgui.get_item_rect_min(), imgui.get_item_rect_max())
+    S.rd_zones.append(z)
+
+
+def zone_item(f, container, depth=0, kind="grid"):
+    """Note the item just drawn (its rect is the last item's) in the open list of that kind."""
+    r = (imgui.get_item_rect_min(), imgui.get_item_rect_max())
+    if S.rd_stack and S.rd_stack[-1]["kind"] == kind:
+        S.rd_rects[f.uid] = r   # its size, for the gap when it's picked up
+        g = is_group(f)
+        S.rd_stack[-1]["entries"].append(dict(
+            uid=f.uid, cont=container, rect=r, depth=depth, group=g,
+            children=f.children if g else None, empty=g and not any(not c.removing for c in f.children)))
+
+
+def dragging(f):
+    """This effect is the one being dragged (it isn't drawn in its list meanwhile)."""
+    return S.rd is not None and f.uid == S.rd["uid"]
+
+
+def gaps_here(container, before, ease=True):
+    """The gaps (height, is the landing spot) open in `container` before item `before` (None: at its end).
+    ease=False (card grids): only the landing spot, at full size - two half-open gaps would shuffle the columns."""
+    if S.rd is None:
+        return []
+    cur, key = gap_key(S.rd["target"]), (id(container), before)
+    if not ease:
+        return [(S.rd["gh"], True)] if key == cur else []
+    return [(h, k == cur) for k, h in S.rd["gaps"].items() if k == key]
+
+
+def gap_box(h, depth=0, current=True):
+    """The open gap where the dragged effect will land."""
+    if h < 1:
+        return
+    imgui.dummy(V(max(1.0, imgui.get_content_region_avail().x), h))
+    mn, mx = imgui.get_item_rect_min(), imgui.get_item_rect_max()
+    if S.rd_stack:
+        S.rd_stack[-1]["entries"].append(dict(gap=True, rect=(mn, mx)))
+    if h > 6:
+        dl = imgui.get_window_draw_list()
+        a = V(mn.x + sc(14) * depth + 2, mn.y + 2)
+        b = V(mx.x - 2, mx.y - 2)
+        dl.add_rect_filled(a, b, u32(alpha(CYAN, .07 if current else .03)), 4)
+        dl.add_rect(a, b, u32(alpha(CYAN, .55 * min(1.0, h / max(1.0, S.rd["gh"])))), 4, thickness=1.5)
+
+
+def reorder_autoscroll():
+    """While dragging near the top or bottom of the current scrolling list, scroll it."""
+    if S.rd is None:
+        return
+    m, wp, wh = imgui.get_io().mouse_pos, imgui.get_window_pos(), imgui.get_window_height()
+    if not wp.x <= m.x <= wp.x + imgui.get_window_width():
+        return
+    edge, speed = sc(36), sc(14)
+    if wp.y - sc(20) < m.y < wp.y + edge:
+        imgui.set_scroll_y(max(0.0, imgui.get_scroll_y() - speed * (1 - (m.y - wp.y) / edge)))
+    elif wp.y + wh - edge < m.y < wp.y + wh + sc(20):
+        imgui.set_scroll_y(min(imgui.get_scroll_max_y(), imgui.get_scroll_y() + speed * (1 - (wp.y + wh - m.y) / edge)))
+
+
+def reorder_ghost():
+    """The effect being dragged, floating under the mouse."""
+    if S.rd is None:
+        return
+    imgui.set_mouse_cursor(imgui.MouseCursor_.resize_all)
+    m = imgui.get_io().mouse_pos
+    dl = imgui.get_foreground_draw_list()
+    text = f"{fa.ICON_FA_FOLDER if S.rd['group'] else fa.ICON_FA_GRIP_VERTICAL}   {S.rd['name']}"
+    tw = imgui.calc_text_size(text).x
+    a, b = V(m.x + 12, m.y - sc(14)), V(m.x + 12 + tw + sc(28), m.y + sc(14))
+    dl.add_rect_filled(V(a.x + 3, a.y + 4), V(b.x + 3, b.y + 4), u32(alpha(BEZEL, .5)), 5)   # shadow
+    keycap(dl, a, b, True, False, CYAN, 4)
+    dl.add_text(V(a.x + sc(14), (a.y + b.y - imgui.get_text_line_height()) / 2), u32(NAME_ON), text)
 
 
 def card_menu(app, f, container):
@@ -2557,7 +2885,7 @@ def effect_card(app, f, i, container):
     icon_button(fa.ICON_FA_GRIP_VERTICAL, "grip", alpha(DIM, .7), size=V(18, 0))
     if imgui.is_item_hovered():
         imgui.set_mouse_cursor(imgui.MouseCursor_.resize_all)
-    card_drag_source(f)
+    reorder_source(f, container)
     imgui.same_line()
     if power_button(f.on, accent, "Bypass on/off (fades)") and not app.midi_learn:
         f.on = not f.on
@@ -2572,6 +2900,7 @@ def effect_card(app, f, i, container):
     imgui.align_text_to_frame_padding()
     if imgui.selectable(f"##name", False, imgui.SelectableFlags_.allow_overlap, V(name_w, sc(28)))[0]:
         f.expanded = not f.expanded
+    reorder_source(f, container)   # so can its name
     card_menu(app, f, container)
     mn = imgui.get_item_rect_min()
     dl = imgui.get_window_draw_list()
@@ -2603,7 +2932,7 @@ def effect_card(app, f, i, container):
         effect_body(app, f)
     imgui.end_child()
 
-    card_drop_target(container, container.index(f))   # drop a card here to put it before this one
+    zone_item(f, container)
     bevel(imgui.get_item_rect_min(), imgui.get_item_rect_max())
     S.midi_scope = outer_scope
     imgui.pop_id()
@@ -2666,7 +2995,7 @@ def group_card(app, g, i, container, show_children=True):
     icon_button(fa.ICON_FA_GRIP_VERTICAL, "grip", alpha(DIM, .7), size=V(18, 0))
     if imgui.is_item_hovered():
         imgui.set_mouse_cursor(imgui.MouseCursor_.resize_all)
-    card_drag_source(g)
+    reorder_source(g, container)
     imgui.same_line()
     if power_button(g.on, VIOLET, "Group on/off (fades)"):
         g.on = not g.on
@@ -2677,6 +3006,7 @@ def group_card(app, g, i, container, show_children=True):
     if imgui.selectable("##gname", False, imgui.SelectableFlags_.allow_overlap, V(name_w, sc(28)))[0]:
         g.expanded = not g.expanded
     imgui.pop_style_color(2)
+    reorder_source(g, container)
     card_menu(app, g, container)
     mn = imgui.get_item_rect_min()
     dl = imgui.get_window_draw_list()
@@ -2760,7 +3090,10 @@ def group_card(app, g, i, container, show_children=True):
         else:
             imgui.text_colored(DIM, "Its effects are in the list above, under the group.")
     imgui.end_child()
-    card_drop_target(g.children, None)   # dropping on the group puts the card inside, at the end
+    zone_item(g, container)   # dropping on the group's middle puts the card inside, at the end
+    if S.rd and S.rd["target"][0] is g.children and not (g.expanded and show_children and n):
+        mn, mx = imgui.get_item_rect_min(), imgui.get_item_rect_max()   # it lands inside: the group lights up
+        imgui.get_window_draw_list().add_rect(mn, mx, u32(CYAN), 4, thickness=2)
     bevel(imgui.get_item_rect_min(), imgui.get_item_rect_max())
     imgui.pop_id()
 
@@ -3961,6 +4294,30 @@ def deck(app, panel=False):
     imgui.pop_style_var()
 
 
+def tile_menu_key(mn, mx, tile_hovered):
+    """A small drop-down key in a look tile's lower-right corner: opens the same menu as right-clicking the tile.
+    Call last for the tile (after its context menu), inside its ID scope; leaves the layout as the tile left it."""
+    d = sc(22)
+    a = V(mx.x - d - sc(6), mx.y - d - sc(8))
+    imgui.set_cursor_screen_pos(a)
+    if imgui.invisible_button("##tmenu", V(d, d)):
+        imgui.open_popup("tilemenu")
+    hov = imgui.is_item_hovered()
+    if hov:
+        imgui.set_tooltip("Look menu: cue, transition, overwrite, export, thumbnail, delete (or right-click the tile)")
+    dl = imgui.get_window_draw_list()
+    b = V(a.x + d, a.y + d)
+    dl.add_rect_filled(a, b, u32(alpha(BEZEL, .85 if hov else .6)), 3)
+    if hov or tile_hovered:
+        dl.add_rect(a, b, u32(EDGE_HI if not hov else CYAN), 3)
+    icon = fa.ICON_FA_CARET_DOWN
+    tw = imgui.calc_text_size(icon)
+    dl.add_text(V((a.x + b.x - tw.x) / 2, (a.y + b.y - tw.y) / 2 + 1),
+                u32(CYAN if hov else (TEXT if tile_hovered else alpha(DIM, .8))), icon)
+    imgui.set_cursor_screen_pos(mn)   # put the layout back as if the tile were the last item
+    imgui.dummy(V(mx.x - mn.x, mx.y - mn.y))
+
+
 def tiles(app, panel_h, with_deck=True):
     # fixed-size tiles that wrap into more rows as the panel gets taller (scroll for the rest)
     th = sc(96)
@@ -3976,6 +4333,7 @@ def tiles(app, panel_h, with_deck=True):
             imgui.same_line(0, 10)
         active = name == app.current_preset
         imgui.push_id(f"tile{name}")
+        imgui.set_next_item_allow_overlap()   # the menu key in its corner sits on top of it
         if imgui.invisible_button("##tile", tile) and not app.midi_learn:
             if imgui.get_io().key_shift:
                 app.cue(None if app.cued == name else name)
@@ -4005,8 +4363,11 @@ def tiles(app, panel_h, with_deck=True):
         dl.add_text(S.mono, 16 * S.scale, V(mn.x + sc(12), mn.y + sc(10)),
                     u32(TEXT if active or thumb else DIM), f"{i + 1:02d}")
         imgui.push_font(S.bold, 17)
+        room, shown = mx.x - mn.x - sc(12) - sc(34), name   # clear of the menu key in the corner
+        while len(shown) > 1 and imgui.calc_text_size(shown if shown == name else shown + "...").x > room:
+            shown = shown[:-1]
         dl.add_text(V(mn.x + sc(12), mx.y - sc(34)), u32(TEXT if active or thumb else KEY_TEXT),
-                    name if len(name) <= 16 else name[:15] + "...")
+                    shown if shown == name else shown.rstrip() + "...")
         imgui.pop_font()
         led(dl, V(mx.x - sc(16), mn.y + sc(17)), CYAN, active, 3.5)   # lit on the look that's playing
         if app.cued == name:   # lined up to go next
@@ -4065,6 +4426,7 @@ def tiles(app, panel_h, with_deck=True):
             if imgui.selectable(f"{fa.ICON_FA_TRASH}   Delete...", False)[0]:
                 S.confirm_delete = name
             imgui.end_popup()
+        tile_menu_key(mn, mx, hovered)
         if S.meta_open == name:   # opened here so it shares the tile's ID scope
             S.meta_open = None
             imgui.open_popup("lookmeta")

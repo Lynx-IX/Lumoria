@@ -34,7 +34,8 @@ HOLD = 0.05      # seconds a hit's target stays at 1
 FADE = 0.22      # seconds for a hit's meter-style level to fade (time constant)
 
 # where each drum is listened for (Hz). Snare / clap: the crack (2-5 kHz) with some of the body (150-350 Hz)
-DETECT = {"kick": (40, 120), "snare_lo": (150, 350), "snare_hi": (1500, 5000), "hat": (7000, 14000)}
+DETECT = {"kick": (40, 120), "kick_sweep": (120, 250), "snare_lo": (150, 350), "snare_hi": (1500, 5000), "hat": (7000, 14000)}
+SNARE_ON_KICK = 0.92   # see the snare below: how big a crack right on a kick has to be
 REFRACTORY = {"kick": 0.11, "snare": 0.09, "hat": 0.05}   # a drum can't hit again sooner than this
 
 
@@ -59,8 +60,9 @@ class Onset:
     recent peak, so quiet and loud music both work; a hit is flux clearly above the last ~0.1 s average, once
     per rise, and not too soon after the last one."""
 
-    def __init__(self, refractory):
+    def __init__(self, refractory, quiet=0.6):
         self.refractory = refractory
+        self.quiet = quiet               # flux below this never counts as loud (near-silence stays quiet)
         self.floor = 0.0                 # a hit must also reach this fraction of the band's recent peak
         self.peak = 0.0
         self.recent = deque(maxlen=10)   # about 0.1 s at 512-sample hops
@@ -69,7 +71,7 @@ class Onset:
     def step(self, flux, now, delta):
         """Returns the hit's strength (scaled flux, 0..1) or 0 for no hit."""
         self.peak = max(flux, self.peak * 0.997)        # falls to half in about 2.5 s
-        fn = flux / max(self.peak, 0.6)                 # the floor keeps near-silence from counting
+        fn = flux / max(self.peak, self.quiet)          # the floor keeps near-silence from counting
         avg = sum(self.recent) / len(self.recent) if self.recent else 0.0
         self.recent.append(fn)
         if not self.armed:
@@ -83,6 +85,26 @@ class Onset:
 
 
 class AudioAnalyzer:
+    @property
+    def hit_sens(self):
+        """All three drums' sensitivity as one number (their average); setting it sets all three."""
+        return sum(self.sens.values()) / len(self.sens)
+
+    @hit_sens.setter
+    def hit_sens(self, v):
+        self.sens = {k: float(v) for k in ("kick", "snare", "hat")}
+
+    def set_sens(self, saved):
+        """Sensitivity from a saved session: one number (older Lumoria: all drums) or {drum: value}."""
+        if isinstance(saved, (int, float)):
+            self.hit_sens = min(1.0, max(0.0, float(saved)))
+        elif isinstance(saved, dict):
+            for k in self.sens:
+                try:
+                    self.sens[k] = min(1.0, max(0.0, float(saved.get(k, self.sens[k]))))
+                except (TypeError, ValueError):
+                    pass
+
     def __init__(self):
         self.stream = None
         self.device_name = None
@@ -109,7 +131,8 @@ class AudioAnalyzer:
         self.band_hz = np.geomspace(30, 16000, SPEC_N)
         self._ranges = {}
         # drum hits: counted in the audio thread, picked up once a frame by update()
-        self.hit_sens = 0.5                  # 0 = only the clearest hits .. 1 = every little one
+        # how easily each drum counts as a hit, on its own: 0 = only the clearest hits .. 1 = every little one
+        self.sens = dict(kick=0.5, snare=0.5, hat=0.5)
         self.swell = [0.0, 0.0, 0.0, 0.0]    # bass, mid, high, all: very slow envelopes (the "sustained" feel)
         self.flow = 0.0                      # a clock that runs faster when the music is busy and never jumps
         self.smooth = 0.3                    # how gradually levels rise and fall: 0 snappy (the old response) .. 1 slow
@@ -163,10 +186,12 @@ class AudioAnalyzer:
         lo_bin = np.searchsorted(freqs, edges[:-1])
         hi_bin = np.maximum(np.searchsorted(freqs, edges[1:]), lo_bin + 1)
         onsets = {k: Onset(r) for k, r in REFRACTORY.items()}
+        onsets["kick"].quiet = 0.004   # the kick is measured on plain loudness (see below), a much smaller scale
+        onsets["hat"].quiet = 0.35     # hats are quiet in most mixes: let fainter ones count
         tracker = tempo.BeatTracker()
         self.beat_est = None
         kicks = deque(maxlen=8)   # recent kick strengths, to tell the big ones
-        state = dict(prev=None, samples=0, peak=0.0, peak_hops=0)
+        state = dict(prev=None, prev_mag=None, samples=0, peak=0.0, peak_hops=0, kick_t=-10.0)
         feat = dict(bal=0.0, width=0.0, bright=0.0, busy=0.0)
         bl, br = np.zeros(1024, np.float32), np.zeros(1024, np.float32)   # the last 1024 samples of each side
         cen = np.flatnonzero((freqs >= 30) & (freqs < 16000))
@@ -216,19 +241,28 @@ class AudioAnalyzer:
                 rise = np.maximum(comp - prev, 0.0)
                 feat["busy"] += (float(rise[busy_bins].mean()) - feat["busy"]) * ease(1.0)
                 flux = {k: float(rise[idx].mean()) if len(idx) else 0.0 for k, idx in det.items()}
-                sens = min(1.0, max(0.0, self.hit_sens))
-                delta = 0.12 + 0.36 * (1.0 - sens)
+                # a kick: its low thump AND its pitch sweep coming down through 120-250 Hz, together, measured on
+                # the plain (not compressed) loudness. A new bass note rises in the low band too, but hardly at all
+                # in the sweep's range, and compressing would make a quiet bass note look as big as a kick
+                lin = np.maximum(mag - state["prev_mag"], 0.0) if state["prev_mag"] is not None else mag * 0
+                kick_hit = math.sqrt(float(lin[det["kick"]].mean()) * float(lin[det["kick_sweep"]].mean()))
+                # each drum has its own sensitivity, so finding quiet hats never loosens the kick
+                sens = {k: min(1.0, max(0.0, v)) for k, v in self.sens.items()}
+                delta = {k: 0.12 + 0.36 * (1.0 - v) for k, v in sens.items()}
                 # a snare's band also jumps on every kick click and hat, a little less than on a real snare:
                 # it only counts when it reaches nearly the band's recent peak (a quiet mix is judged the same)
-                onsets["snare"].floor = 0.95 - 0.2 * sens
+                onsets["snare"].floor = 0.95 - 0.2 * sens["snare"]
+                # a kick has to be a good part as strong as the recent ones (a stray low thud isn't)
+                onsets["kick"].floor = 0.5 - 0.2 * sens["kick"]
                 lvl = float(comp[det["kick"]].mean())
                 # the tempo tracker's envelope: rises across the mix, the kick's range counting double
                 tracker.mult = self.beat_mult
                 if tracker.push(now, float(rise[busy_bins].mean()) + 2.0 * flux["kick"]) and tracker.bpm:
                     with self._lock:
                         self.beat_est = (tracker.bpm, tracker.conf, tracker.since, time.perf_counter(), tracker.count)
-                if onsets["kick"].step(flux["kick"], now, delta):
+                if onsets["kick"].step(kick_hit, now, delta["kick"]):
                     hits.append("kick")
+                    state["kick_t"] = now
                     state["peak"], state["peak_hops"] = lvl, 3   # watch how loud it gets over ~30 ms
                 elif state["peak_hops"]:
                     state["peak"] = max(state["peak"], lvl)
@@ -238,11 +272,16 @@ class AudioAnalyzer:
                             hits.append("accent")
                         kicks.append(state["peak"])
                 # snare / clap: its crack. (Its body sits where a kick's pitch sweep does, so it can't tell them apart)
-                if onsets["snare"].step(flux["snare_hi"], now, delta):
+                # A kick's click reaches up into the crack's range too: right on a kick, only a crack nearly as big
+                # as the recent snares counts (a real snare on the same beat still is)
+                if now - state["kick_t"] < 0.04:
+                    onsets["snare"].floor = max(onsets["snare"].floor, SNARE_ON_KICK)
+                if onsets["snare"].step(flux["snare_hi"], now, delta["snare"]):
                     hits.append("snare")
                 # hats: the top end jumping more than the snare's range does (a snare's noise reaches up there too)
-                if onsets["hat"].step(max(0.0, flux["hat"] - 0.8 * flux["snare_hi"]), now, delta):
+                if onsets["hat"].step(max(0.0, flux["hat"] - 0.8 * flux["snare_hi"]), now, delta["hat"]):
                     hits.append("hat")
+            state["prev_mag"] = mag
             with self._lock:
                 self._raw = raw
                 self._spec_raw, self._wave_raw, self._band_raw = spec, wave, band.astype(np.float32)

@@ -63,6 +63,12 @@ class _ThreadedSource:
             self._new = False
             return self._frame
 
+    def resend(self):
+        """Hand out the last frame again on the next latest() (after moving to another slot: a still image or a
+        paused video has no new frame to give)."""
+        with self._lock:
+            self._new = self._frame is not None
+
     def close(self):
         self._stop.set()
         self._thread.join(timeout=2)

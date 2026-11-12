@@ -119,6 +119,9 @@ They live in `samples/`; the welcome (Settings > About > Show the welcome again)
   in such files to the end of your playlist (with their transitions and timing); a name you already use gets
   a number, so nothing is overwritten. Looks don't include sources, so they work on anyone's setup.
 - **Sources:** *Input* has the main source plus Source 2-4 (cameras, video files, images, screen capture).
+  **Make main** (the arrow key beside Source 2, 3 or 4) swaps that source with the main one - both keep running,
+  with their crop and person mask setting - and the new main source comes in with the sidebar's *Transitions*
+  setting (Dissolve or Grow over its time, or Cut). Put it on a MIDI pad: MIDI learn, then click the arrow.
   Screens and windows capture at 30 or 60 fps. Capture uses DXGI desktop duplication (the same method as OBS's
   Display Capture: very little CPU), so a full 1440p screen keeps up at 60. Windows have *Fast* (cut from that
   screen capture, so keep the window visible) or *Behind others* (keeps working while covered, slower for big

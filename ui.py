@@ -2118,7 +2118,9 @@ def source_picker(app, target, desc, src):
     kind = desc.get("kind", "none")
     croppable = src is not None and kind not in ("none", "test")
     maskable = kind != "none"
-    imgui.set_next_item_width(-(sc(34) if croppable else 0) - (sc(32) if maskable else 0) or -1)
+    promotable = target != "main" and kind != "none"   # a Make main key
+    imgui.set_next_item_width(-(sc(34) if croppable else 0) - (sc(32) if maskable else 0)
+                              - (sc(32) if promotable else 0) or -1)
     if imgui.begin_combo(f"##src{target}", f"{KIND_ICONS.get(kind, '')}   {describe(desc)}"):
         if target != "main" and imgui.selectable(f"{fa.ICON_FA_CIRCLE_XMARK}   None", kind == "none")[0]:
             app.choose_source(target, {"kind": "none"})
@@ -2151,6 +2153,17 @@ def source_picker(app, target, desc, src):
                             imgui.SelectableFlags_.no_auto_close_popups)[0]:
             app.cameras, app.audio_devs, app.screens = list_cameras(), list_inputs(), list_screens()
         imgui.end_combo()
+    if promotable:
+        imgui.same_line(0, sc(4))
+        style = TRANSITIONS[app.pipe.transition]
+        how = "a cut" if app.pipe.transition == 2 else \
+            f"{style.lower()}, {amount_text(app.pipe.trans_time, app.pipe.trans_unit)}"
+        if icon_button(fa.ICON_FA_ARROW_UP_FROM_BRACKET, f"main{target}", CYAN,
+                       f"Make main: Source {target + 2} becomes the main source and the main one moves here\n"
+                       f"(both keep running). It comes in with the Transitions setting: {how}.\n"
+                       "MIDI learn, then click this, to put it on a pad.") and not app.midi_learn:
+            app.make_main(target)
+        midi_spot(app, ("app", f"main{target + 2}"))
     if maskable:
         imgui.same_line(0, sc(4))
         person_mask_button(app, target, desc)

@@ -143,6 +143,9 @@ float beatGlide(){ return u_beats - 1. + smoothstep(0., .2, u_since); }
 SOURCE = """
 uniform vec2 u_scale;
 uniform int u_mode;   // 0 = texture, 1 = test pattern
+uniform sampler2D u_from;   // a source swapped out of the main slot: its last picture, fading away (Make main)
+uniform float u_xf;         // how far the new main source has come in (1 = all of it)
+uniform int u_xf_style;     // 0 dissolve, 1 grow (from the middle)
 vec3 testPattern(vec2 uv){
   float t = u_time;
   vec3 c = mix(vec3(.08,.02,.18), vec3(.02,.12,.2), uv.x + .2*sin(t*.5));
@@ -159,8 +162,17 @@ vec3 testPattern(vec2 uv){
 }
 void main(){
   vec2 uv = v_uv;
-  if (u_mode == 1) { o = vec4(testPattern(uv), 1.); return; }
-  o = vec4(texture(u_tex, (uv-.5)*u_scale+.5).rgb, 1.);
+  vec3 c = u_mode == 1 ? testPattern(uv) : texture(u_tex, (uv-.5)*u_scale+.5).rgb;
+  if (u_xf < 1.) {   // Make main: the new main source comes in over the old one's last picture
+    vec3 old = texture(u_from, uv).rgb;
+    float k = u_xf*u_xf*(3. - 2.*u_xf);
+    if (u_xf_style == 1) {
+      float r = length((uv - .5)*vec2(u_res.x/u_res.y, 1.));
+      k = smoothstep(k*1.05 - .02, k*1.05 - .06, r);   // a circle growing from the middle
+    }
+    c = mix(old, c, k);
+  }
+  o = vec4(c, 1.);
 }
 """
 

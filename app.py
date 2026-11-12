@@ -353,6 +353,9 @@ class Pipeline:
         self.src_prog = ctx.program(vertex_shader=E.VERT, fragment_shader=E.HEAD + E.SOURCE)
         self.copy_prog = ctx.program(vertex_shader=E.VERT, fragment_shader=E.HEAD + E.COPY)
         self.src_vao = ctx.vertex_array(self.src_prog, [])
+        set_u(self.src_prog, "u_from", 4)
+        set_u(self.src_prog, "u_xf", 1.0)
+        self.src_from, self.src_fade = None, None   # Make main: the old main's last picture, and (start, secs, style)
         self.copy_vao = ctx.vertex_array(self.copy_prog, [])
         # a group's finished picture (unit 4) blended over its input with the usual blend wrapper
         self.group_prog = ctx.program(vertex_shader=E.VERT, fragment_shader=E.HEAD
@@ -547,6 +550,22 @@ class Pipeline:
                 index -= 1
             src.remove(item)
         dest.insert(len(dest) if index is None else index, item)
+
+    def start_source_fade(self, t, secs, style):
+        """Make main: hold the main picture as it is now (the clean feed), for the new main source to come in over -
+        a dissolve, or growing from the middle (style 1), over secs. Cut (style 2): no fade."""
+        if style == 2 or secs < 0.05 or self.clean is None:
+            self.src_fade = None
+            return
+        if self.src_from is None or self.src_from.tex.size != self.size:
+            if self.src_from is not None:
+                self.src_from.release()
+            self.src_from = Target(self.ctx, *self.size)
+        self.src_from.fbo.use()
+        self.clean.tex.use(0)
+        set_u(self.copy_prog, "u_tex", 0)
+        self.copy_vao.render(vertices=3)
+        self.src_fade = (t, secs, style)
 
     def upload(self, frame):
         h, w = frame.shape[:2]
@@ -743,6 +762,15 @@ class Pipeline:
         set_u(p, "u_mode", 0 if use_tex else 1)
         set_u(p, "u_res", (W, H))
         set_u(p, "u_time", t)
+        xf = 1.0
+        if self.src_fade and self.src_from is not None and self.src_from.tex.size == (W, H):
+            t0, secs, style = self.src_fade
+            xf = min(1.0, max(0.0, (t - t0) / max(secs, 1e-3)))
+            self.src_from.tex.use(4)
+            set_u(p, "u_xf_style", style)
+            if xf >= 1.0:
+                self.src_fade = None
+        set_u(p, "u_xf", xf)
         self.src_vao.render(vertices=3)
 
         # effect chain; u_prev is last frame's output for feedback effects
@@ -1481,6 +1509,38 @@ class App:
         if self.segmenter:
             self.segmenter.reset()
 
+    def make_main(self, slot):
+        """Make Source 2-4 (slot 0-2) the main source: the two swap places (each keeps running, with its crop and
+        person mask setting), and the new one comes in with the Transitions setting (Dissolve / Grow / Cut and its
+        time), over the old one's last picture."""
+        desc = self.extra_desc[slot]
+        if desc.get("kind", "none") == "none":
+            self.flash(f"Pick something for Source {slot + 2} first", 3)
+            return
+        if self.cropping and self.cropping["target"] in ("main", slot):
+            self.cropping = None
+        self.pipe.start_source_fade(glfw.get_time(), self.pipe.trans_secs, self.pipe.transition)
+        old_src, old_desc = self.source, self.source_desc
+        self.source, self.source_desc = self.extra[slot], desc
+        if self.source is not None:
+            self.source.paused = False   # it may have been resting while no layer showed it
+        self.source_label = describe(desc)
+        self.flip_preview = desc.get("kind") == "camera"
+        if old_desc.get("kind") == "test":   # the test pattern isn't a Source 2-4 choice: that slot is left empty
+            old_src, old_desc = None, {"kind": "none"}
+        self.extra[slot], self.extra_desc[slot] = old_src, old_desc
+        if old_src is not None:
+            old_src.paused = False
+        self.pipe.upload_media(slot, None)   # its picture comes from its new source from the next frame
+        for src in (self.source, old_src):   # both send their picture again, to their new places
+            if src is not None and hasattr(src, "resend"):
+                src.resend()
+        if self.segmenter:
+            self.segmenter.reset()
+        if self.slot_segs[slot] is not None:
+            self.slot_segs[slot].reset()
+        self.flash(f"Main source: {self.source_label}", 2)
+
     def set_resolution(self, idx):
         self.res_idx = idx
         _, w, h = RESOLUTIONS[idx]
@@ -1729,6 +1789,9 @@ class App:
                 "cue_prev": ("trigger", 0, 1, None, lambda: self.cue_step(-1), "Cue previous look"),
                 "record": ("trigger", 0, 1, None, self.toggle_record, "Record on / off"),
                 "resync": ("trigger", 0, 1, None, lambda: self.resync_bar(), "Beat 1 (re-sync bar)"),
+                "main2": ("trigger", 0, 1, None, lambda: self.make_main(0), "Make Source 2 the main source"),
+                "main3": ("trigger", 0, 1, None, lambda: self.make_main(1), "Make Source 3 the main source"),
+                "main4": ("trigger", 0, 1, None, lambda: self.make_main(2), "Make Source 4 the main source"),
                 "tl_record": ("toggle", 0, 1, lambda: self.tl_recording, lambda v: self.set_tl_recording(v),
                               "Record into the look's timeline"),
             }.get(key)

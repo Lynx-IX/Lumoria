@@ -11,6 +11,12 @@ a test copy before anything lands on main.
   its playhead (`out_playhead`) while it fades; auto-play on a timeline look counts loop passes
   (`auto_timeline_step`); a one-look playlist just keeps looping. Firing the look already on air, the crossfader
   and random auto-play skip the outro. Cut and Morph don't overlap the outro.
+- Step 3 (basic editor) done: `ui.timeline_window` (a floating window, from a tile's menu > Timeline...): length,
+  grid, whole loop or intro / loop / outro, on leave, auto-play loops, + Lane (effect > slider), a ruler with
+  draggable markers and tinted sections, lanes with points (click to add, drag, Shift = off the grid, right-click:
+  segment / delete), mute and remove, the playhead when the look is on air. Every change is saved into the look
+  file (`App.edit_timeline`) and played at once if the look is on air. Not yet: undo, box-select, copy / paste,
+  zoom (step 6).
 
 ## The idea in one paragraph
 

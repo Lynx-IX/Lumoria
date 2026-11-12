@@ -20,6 +20,7 @@ import effects as E
 import recorder
 import sysload
 import tempo
+import timeline
 import audio as A
 from audio import list_inputs
 from segment import QUALITY as SEG_QUALITY
@@ -218,6 +219,8 @@ class _State:
     topbar_h = 0.0                 # the top bar's height last frame (taller when its keys stack)
     rd = None                      # the effect being dragged to a new place in the chain (reorder_source)
     rd_zones, rd_stack, rd_rects, rd_prev_rects = [], [], {}, {}   # this frame's lists and items, for the next
+    tl = None                      # the timeline editor: {name, tl, ids, drag, menu} for the look it's open on
+    tl_focus = False
     flow_first = True              # Custom: the next flow() item starts the panel (no same_line before it)
 
 
@@ -713,6 +716,7 @@ def draw(app):
         classic_layout(app, W, H, tb)
         imgui.end()
     settings_window(app, W, H, tb)
+    timeline_window(app, W, H, tb)
 
     restore_prompt(app)
     welcome(app)
@@ -4391,6 +4395,403 @@ def deck(app, panel=False):
     imgui.pop_style_var()
 
 
+# ---------------------------------------------------------------- look timeline editor
+
+TL_GRIDS = {"bars": [(1 / 16, "1/4 beat"), (0.25, "Beat"), (0.5, "1/2 bar"), (1.0, "Bar")],
+            "seconds": [(0.1, "0.1 s"), (0.25, "0.25 s"), (0.5, "0.5 s"), (1.0, "1 s")]}
+TL_LANE_H, TL_RULER_H, TL_NAMES_W = 58, 26, 200
+TL_SEG_NAMES = {"ramp": "Ramp (straight line)", "ease": "Ease (smooth in and out)", "hold": "Hold, then jump"}
+
+
+def new_timeline():
+    return dict(unit="bars", length=8.0, grid=0.25, on_leave="finish", loops=0, lanes=[])
+
+
+def open_timeline(app, name):
+    """Open the timeline editor on look `name` (a copy of its timeline; every change is saved back)."""
+    tl, ids = app.look_timeline(name)
+    S.tl = dict(name=name, tl=json.loads(json.dumps(tl)) if tl else None, ids=ids, drag=None, menu=None)
+    S.tl_focus = True
+
+
+def effect_kind(app, eid):
+    """A library effect of the same kind as effect id `eid` (copies like "edges#2" share their kind's sliders)."""
+    kind = eid.split("#")[0]
+    return next((f for f in app.pipe.effects if f.kind == kind), None)
+
+
+def lane_sliders(f):
+    """[(key, name, lo, hi, format)] an effect's lanes can move: the same sliders its card can automate."""
+    out = [("amt", f.amt_label or "Amount", 0.0, 1.0, "%.2f"), ("opacity", "Opacity", 0.0, 1.0, "%.2f")]
+    if f.xform:
+        out += [("xs", "Scale", 0.1, 8.0, "%.2fx"), ("xr", "Rotate", -360.0, 360.0, "%.0f deg")]
+    if f.has_speed:
+        out.append(("speed", "Speed", -3.0, 3.0, "%.2fx"))
+    out += [(f"p{j}", name, lo, hi, fmt) for j, (name, _d, lo, hi, fmt) in enumerate(f.params)]
+    return out
+
+
+def lane_info(app, lane):
+    """(effect name, slider name, lo, hi, format) for a lane; a lane whose effect isn't known keeps its points' range."""
+    f = effect_kind(app, lane["effect"])
+    if f is not None:
+        for key, name, lo, hi, fmt in lane_sliders(f):
+            if key == lane["key"]:
+                copy = lane["effect"].split("#")
+                return (f.spec["name"] + (f" {copy[1]}" if len(copy) > 1 else "")), name, lo, hi, fmt
+    vals = [p[1] for p in lane["points"]] or [0.0, 1.0]
+    return lane["effect"], lane["key"], min(vals), max(max(vals), min(vals) + 1e-3), "%.2f"
+
+
+def tl_changed(app):
+    app.edit_timeline(S.tl["name"], S.tl["tl"])
+
+
+def timeline_window(app, W, H, tb):
+    """The timeline of one look: a ruler in bars with the intro / loop / outro markers, and a lane per slider, made of
+    points joined by ramps, eases or holds. Click a lane to add a point, drag one to move it (Shift: off the grid),
+    right-click one for its segment or to delete it."""
+    if not S.tl:
+        return
+    ed = S.tl
+    vp = imgui.get_main_viewport()
+    imgui.set_next_window_pos(V(vp.pos.x + W * 0.12, vp.pos.y + max(tb + 40, H * 0.35)), imgui.Cond_.first_use_ever)
+    imgui.set_next_window_size(V(W * 0.76, min(sc(460), H * 0.55)), imgui.Cond_.first_use_ever)
+    if S.tl_focus:
+        imgui.set_next_window_focus()
+        S.tl_focus = False
+    imgui.push_style_color(imgui.Col_.window_bg, PANEL)
+    imgui.push_style_color(imgui.Col_.border, BORDER)
+    imgui.push_style_var(imgui.StyleVar_.window_border_size, 1)
+    opened, keep = imgui.begin(f"{fa.ICON_FA_TIMELINE}   Timeline: {ed['name']}###timeline", True, imgui.WindowFlags_.no_saved_settings
+                               | imgui.WindowFlags_.no_collapse)
+    imgui.pop_style_var()
+    imgui.pop_style_color(2)
+    if not keep:
+        S.tl = None
+        imgui.end()
+        return
+    if opened:
+        if ed["tl"] is None:
+            timeline_empty(app, ed)
+        else:
+            timeline_header(app, ed)
+            timeline_body(app, ed)
+    imgui.end()
+
+
+def timeline_empty(app, ed):
+    imgui.spacing()
+    imgui.text_colored(DIM, "This look has no timeline yet. A timeline moves its sliders over time, in bars on the "
+                            "tempo clock:")
+    imgui.text_colored(DIM, "an intro that plays once, a loop that repeats while the look is on, and an outro that "
+                            "plays as it leaves.")
+    imgui.spacing()
+    if neon_button(f"{fa.ICON_FA_PLUS}   Make a timeline (8 bars)", CYAN, V(sc(260), 0)):
+        ed["tl"] = new_timeline()
+        tl_changed(app)
+
+
+def timeline_header(app, ed):
+    tl = ed["tl"]
+    unit = tl.get("unit", "bars")
+    u = "bars" if unit == "bars" else "s"
+    imgui.align_text_to_frame_padding()
+    imgui.text_colored(DIM, "Length")
+    imgui.same_line()
+    imgui.set_next_item_width(sc(150))
+    changed, n = slider_float("##tllen", tl["length"], 1.0, 64.0, f"%.0f {u}")
+    if changed:
+        tl["length"] = float(max(1, round(n)))
+        for k in ("intro_end", "loop_end"):
+            if k in tl:
+                tl[k] = min(tl[k], tl["length"])
+    if imgui.is_item_deactivated_after_edit():
+        tl_changed(app)
+    imgui.same_line(0, 18)
+    imgui.text_colored(DIM, "Grid")
+    imgui.same_line()
+    grids = TL_GRIDS[unit]
+    gi = min(range(len(grids)), key=lambda i: abs(grids[i][0] - tl.get("grid", 0.25)))
+    g = segmented("tlgrid", [n for _, n in grids], gi, VIOLET, sc(250))
+    if g != gi:
+        tl["grid"] = grids[g][0]
+        tl_changed(app)
+    imgui.same_line(0, 18)
+    has = "loop_end" in tl
+    sec = segmented("tlsec", ("Whole loop", "Intro / loop / outro"), int(has), CYAN, sc(280))
+    if imgui.is_item_hovered():
+        imgui.set_tooltip("Whole loop: the timeline repeats while the look is on\n"
+                          "Intro / loop / outro: drag the two markers on the ruler. The intro plays once, the loop\n"
+                          "repeats, and the outro plays when the look is leaving (Take, auto-play, a click)")
+    if sec != int(has):
+        if sec:
+            L = tl["length"]
+            tl["intro_end"], tl["loop_end"] = round(L / 4), round(L * 3 / 4)
+        else:
+            tl.pop("intro_end", None)
+            tl.pop("loop_end", None)
+        tl_changed(app)
+    if has:
+        imgui.same_line(0, 18)
+        imgui.text_colored(DIM, "On leave")
+        imgui.same_line()
+        lv = segmented("tlleave", ("Finish the pass", "Jump to outro"), int(tl.get("on_leave") == "jump"), AMBER,
+                       sc(260))
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("Finish the pass: the loop plays to its end, then the outro\n"
+                              "Jump to outro: the outro starts straight away (on the launch beat / bar if set)")
+        if lv != int(tl.get("on_leave") == "jump"):
+            tl["on_leave"] = "jump" if lv else "finish"
+            tl_changed(app)
+    # second row: auto-play, lanes, where it is
+    imgui.align_text_to_frame_padding()
+    imgui.text_colored(DIM, "Auto-play")
+    imgui.same_line()
+    imgui.set_next_item_width(sc(130))
+    lp = tl.get("loops", 0)
+    changed, lp2 = slider_int("##tlloops", lp, 0, 32, "%d")
+    if imgui.is_item_hovered():
+        imgui.set_tooltip("How many loop passes auto-play stays on this look\n0 = as many as fit the playlist's 'every'")
+    if changed:
+        tl["loops"] = lp2
+    if imgui.is_item_deactivated_after_edit():
+        tl_changed(app)
+    imgui.same_line()
+    imgui.text_colored(DIM, "loops (0: fit 'every')" if lp == 0 else ("loop" if lp == 1 else "loops"))
+    imgui.same_line(0, 18)
+    if neon_button(f"{fa.ICON_FA_PLUS}  Lane##tladd", CYAN, V(0, 0), tip="Add a lane: pick an effect in this look, "
+                                                                          "then the slider it moves"):
+        imgui.open_popup("tl_add")
+    if imgui.begin_popup("tl_add"):
+        timeline_add_menu(app, ed)
+        imgui.end_popup()
+    # where it is, if this look is on air
+    if ed["name"] == app.current_preset and app.playhead is not None:
+        pos, section, n = app.playhead.where(app.tempo.phase, glfw.get_time())
+        imgui.same_line(0, 18)
+        imgui.text_colored(CYAN, f"{section}" + (f" {n + 1}" if section == "loop" else "") + f"   {pos:.2f} {u}")
+
+
+def timeline_add_menu(app, ed):
+    tl, used = ed["tl"], {(ln["effect"], ln["key"]) for ln in ed["tl"]["lanes"]}
+    if not ed["ids"]:
+        imgui.text_colored(DIM, "This look has no effects.")
+    for eid in ed["ids"]:
+        f = effect_kind(app, eid)
+        if f is None:
+            continue
+        copy = eid.split("#")
+        if imgui.begin_menu(f"{f.spec['name']}{' ' + copy[1] if len(copy) > 1 else ''}##{eid}"):
+            for key, name, lo, hi, _fmt in lane_sliders(f):
+                if imgui.menu_item_simple(name, "", False, (eid, key) not in used):
+                    # start it where the slider is now, if the effect is on air
+                    live = next((x for x in walk_items(app.pipe.order) if getattr(x, "id", None) == eid
+                                 and not is_group(x)), None) if ed["name"] == app.current_preset else None
+                    v = lane_current(live, key, lo, hi)
+                    tl["lanes"].append(dict(effect=eid, key=key, mode="value", mute=False,
+                                            points=[[0.0, v, "ramp"]]))
+                    tl_changed(app)
+            imgui.end_menu()
+
+
+def lane_current(f, key, lo, hi):
+    if f is None:
+        return (lo + hi) / 2 if key not in ("amt", "opacity", "xs", "speed") else (1.0 if key != "amt" else 0.5)
+    if key == "amt":
+        return f.amt
+    if key in ("opacity", "speed", "xs", "xr"):
+        return getattr(f, key)
+    j = int(key[1:])
+    return f.pvals[j] if j < len(f.pvals) else lo
+
+
+def timeline_body(app, ed):
+    tl = ed["tl"]
+    a, b, length = timeline.sections(tl)
+    imgui.begin_child("tl_body", V(0, 0), 0, imgui.WindowFlags_.no_scroll_with_mouse if ed["drag"] else 0)
+    dl = imgui.get_window_draw_list()
+    p0 = imgui.get_cursor_screen_pos()
+    width = imgui.get_content_region_avail().x
+    gx0, gx1 = p0.x + sc(TL_NAMES_W), p0.x + width - 8
+    x_of = lambda pos: gx0 + (gx1 - gx0) * pos / length
+    pos_of = lambda x: (x - gx0) / max(1.0, gx1 - gx0) * length
+    grid = tl.get("grid", 0.25)
+    snap = lambda pos: pos if imgui.get_io().key_shift else round(pos / grid) * grid
+    lanes_h = sc(TL_LANE_H) * max(1, len(tl["lanes"]))
+    top, bot = p0.y + sc(TL_RULER_H), p0.y + sc(TL_RULER_H) + lanes_h
+    ed["geo"] = (gx0, gx1, p0.y, top)   # where the graph is (the ruler's top, the lanes' top), e.g. for scripted checks
+    # sections, tinted across every lane
+    if "loop_end" in tl:
+        for lo_, hi_, col in ((0.0, a, VIOLET), (a, b, CYAN), (b, length, MAGENTA)):
+            if hi_ > lo_:
+                dl.add_rect_filled(V(x_of(lo_), p0.y), V(x_of(hi_), bot), u32(alpha(col, .10)))
+    # ruler: bars (or seconds) with beat ticks
+    dl.add_rect_filled(V(gx0, p0.y), V(gx1, top), u32(LCD_BG), 3)
+    beats = 4 if tl.get("unit", "bars") == "bars" else 1
+    step = 1 if length <= 32 else 2 if length <= 64 else 4
+    for i in range(int(length) + 1):
+        x = x_of(i)
+        dl.add_line(V(x, top - (10 if i % step == 0 else 5)), V(x, bot), u32(alpha(BORDER, .9 if i % 4 == 0 else .5)), 1)
+        if i % step == 0 and i < length:
+            dl.add_text(S.mono, 13 * S.scale, V(x + 4, p0.y + 4), u32(alpha(LCD, .8)), f"{i + 1}")
+        if beats > 1 and i < length and (gx1 - gx0) / length > 40:
+            for k in range(1, beats):
+                xb = x_of(i + k / beats)
+                dl.add_line(V(xb, top - 3), V(xb, top), u32(alpha(LCD, .3)), 1)
+    # markers on the ruler: drag to move
+    imgui.set_cursor_screen_pos(V(gx0, p0.y))
+    imgui.invisible_button("##ruler", V(max(1.0, gx1 - gx0), sc(TL_RULER_H)))
+    if "loop_end" in tl:
+        for key, col, tip in (("intro_end", VIOLET, "Intro ends, the loop starts"),
+                              ("loop_end", MAGENTA, "The loop ends; the outro plays from here when the look leaves")):
+            x = x_of(tl[key])
+            near_m = abs(imgui.get_io().mouse_pos.x - x) < 8 and p0.y <= imgui.get_io().mouse_pos.y <= top
+            if imgui.is_item_clicked() and near_m and ed["drag"] is None:
+                ed["drag"] = ("marker", key)
+            if ed["drag"] == ("marker", key):
+                v = min(max(0.0, snap(pos_of(imgui.get_io().mouse_pos.x))), length)
+                tl[key] = min(v, tl["loop_end"]) if key == "intro_end" else max(v, tl["intro_end"])
+            hot = near_m or ed["drag"] == ("marker", key)
+            dl.add_triangle_filled(V(x - 7, p0.y), V(x + 7, p0.y), V(x, p0.y + 12), u32(col))
+            dl.add_line(V(x, p0.y), V(x, bot), u32(alpha(col, .9 if hot else .55)), 2 if hot else 1)
+            if near_m:
+                imgui.set_mouse_cursor(imgui.MouseCursor_.resize_ew)
+                imgui.set_tooltip(f"{tip}  (bar {tl[key] + 1:g})")
+    # lanes
+    remove = None
+    for li, lane in enumerate(tl["lanes"]):
+        y0 = top + li * sc(TL_LANE_H)
+        y1 = y0 + sc(TL_LANE_H) - 4
+        ename, sname, lo, hi, fmt = lane_info(app, lane)
+        dl.add_rect_filled(V(p0.x, y0), V(gx0 - 6, y1), u32(CARD), 3)
+        dl.add_text(V(p0.x + 8, y0 + 5), u32(TEXT if not lane.get("mute") else DIM), sname)
+        dl.add_text(S.font, 13 * S.scale, V(p0.x + 8, y0 + 24), u32(DIM), ename)
+        imgui.set_cursor_screen_pos(V(gx0 - 6 - sc(56), y0 + 4))
+        imgui.push_id(f"lane{li}")
+        if icon_button(fa.ICON_FA_EYE_SLASH if lane.get("mute") else fa.ICON_FA_EYE, "mute",
+                       AMBER if lane.get("mute") else alpha(DIM, .7),
+                       "Muted: this lane doesn't move its slider (click to use it again)" if lane.get("mute")
+                       else "Mute: stop this lane moving its slider, keeping its points", V(sc(26), 0)):
+            lane["mute"] = not lane.get("mute")
+            tl_changed(app)
+        imgui.same_line(0, 2)
+        if icon_button(fa.ICON_FA_XMARK, "rm", DIM, "Remove this lane", V(sc(26), 0), hover_col=RED):
+            remove = li
+        timeline_lane(app, ed, lane, li, (gx0, y0, gx1, y1), lo, hi, fmt, x_of, pos_of, snap, dl)
+        imgui.pop_id()
+    if not tl["lanes"]:
+        dl.add_text(V(gx0 + 12, top + sc(20)), u32(DIM), "+ Lane above adds one: pick an effect, then the slider it moves.")
+    # the playhead, if this look is on air
+    if ed["name"] == app.current_preset and app.playhead is not None:
+        pos, section, _n = app.playhead.where(app.tempo.phase, glfw.get_time())
+        x = x_of(min(pos, length))
+        dl.add_line(V(x, p0.y), V(x, bot), u32(WHITE if section != "outro" else MAGENTA), 2)
+    imgui.set_cursor_screen_pos(V(p0.x, bot + 4))
+    imgui.dummy(V(1, 4))
+    # a drag ends on release: points are kept in order, and the change is saved
+    if ed["drag"] and not imgui.is_mouse_down(0):
+        for lane in tl["lanes"]:
+            lane["points"].sort(key=lambda p: p[0])
+        ed["drag"] = None
+        tl_changed(app)
+    if remove is not None:
+        tl["lanes"].pop(remove)
+        tl_changed(app)
+    timeline_point_menu(app, ed)
+    imgui.end_child()
+
+
+def timeline_lane(app, ed, lane, li, rect, lo, hi, fmt, x_of, pos_of, snap, dl):
+    """One lane's graph: its line, its points, and the mouse on them."""
+    gx0, y0, gx1, y1 = rect
+    tl = ed["tl"]
+    pad = 7
+    y_of = lambda v: y1 - pad - (y1 - y0 - 2 * pad) * (min(hi, max(lo, v)) - lo) / max(1e-9, hi - lo)
+    v_of = lambda y: lo + (hi - lo) * min(1.0, max(0.0, (y1 - pad - y) / max(1.0, y1 - y0 - 2 * pad)))
+    dl.add_rect_filled(V(gx0, y0), V(gx1, y1), u32(alpha(FRAME, .85)), 3)
+    if lo < 0 < hi:   # where zero is, for sliders that go both ways
+        dl.add_line(V(gx0, y_of(0.0)), V(gx1, y_of(0.0)), u32(alpha(BORDER, .8)), 1)
+    imgui.set_cursor_screen_pos(V(gx0, y0))
+    imgui.invisible_button("##graph", V(max(1.0, gx1 - gx0), y1 - y0),
+                           imgui.ButtonFlags_.mouse_button_left | imgui.ButtonFlags_.mouse_button_right)
+    hovered = imgui.is_item_hovered()
+    m = imgui.get_io().mouse_pos
+    pts = lane["points"]
+    col = alpha(CYAN, .35) if lane.get("mute") else CYAN
+    # the line: before the first point and after the last it holds
+    line = []
+    if pts:
+        line.append(V(gx0, y_of(pts[0][1])))
+        for (x0, v0, seg), (x1_, v1, _) in zip(pts, pts[1:]):
+            line.append(V(x_of(x0), y_of(v0)))
+            if seg == "hold":
+                line.append(V(x_of(x1_), y_of(v0)))
+            elif seg == "ease":
+                for k in range(1, 16):
+                    u = k / 16
+                    line.append(V(x_of(x0 + (x1_ - x0) * u), y_of(v0 + (v1 - v0) * u * u * (3 - 2 * u))))
+        line.append(V(x_of(pts[-1][0]), y_of(pts[-1][1])))
+        line.append(V(gx1, y_of(pts[-1][1])))
+        dl.add_polyline(points=line, col=u32(col), thickness=2.0, flags=0)
+    # points: the one under the mouse lights up
+    near = None
+    for pi, p in enumerate(pts):
+        c = V(x_of(p[0]), y_of(p[1]))
+        if hovered and abs(m.x - c.x) <= 8 and abs(m.y - c.y) <= 8:
+            near = pi
+        dragging = ed["drag"] == ("point", li, id(p))
+        dl.add_circle_filled(c, 5.5 if near == pi or dragging else 4.5, u32(BEZEL))
+        dl.add_circle_filled(c, 4 if near == pi or dragging else 3, u32(WHITE if near == pi or dragging else col))
+    if near is not None:
+        p = pts[near]
+        imgui.set_tooltip(f"{fmt % p[1]}  at {p[0] + 1:g}   ({TL_SEG_NAMES[p[2]].split(' (')[0].lower()} to the next)\n"
+                          "Drag to move (Shift: off the grid), right-click for more")
+    # mouse: press on a point drags it; a click on empty lane adds one; right-click a point for its menu
+    if imgui.is_item_clicked(0) and ed["drag"] is None:
+        if near is not None:
+            ed["drag"] = ("point", li, id(pts[near]))
+        else:
+            p = [min(max(0.0, snap(pos_of(m.x))), tl["length"]), v_of(m.y), "ramp"]
+            prev = [q for q in pts if q[0] <= p[0]]
+            if prev:
+                p[2] = prev[-1][2]   # a new point keeps the shape of the segment it splits
+            pts.append(p)
+            pts.sort(key=lambda q: q[0])
+            ed["drag"] = ("point", li, id(p))
+    if imgui.is_item_clicked(1) and near is not None:
+        ed["menu"] = (li, id(pts[near]))
+        imgui.open_popup("tl_point")
+    if ed["drag"] and ed["drag"][0] == "point" and ed["drag"][1] == li:
+        p = next((q for q in pts if id(q) == ed["drag"][2]), None)
+        if p is not None:
+            p[0] = min(max(0.0, snap(pos_of(m.x))), tl["length"])
+            p[1] = v_of(m.y)
+            pts.sort(key=lambda q: q[0])
+
+
+def timeline_point_menu(app, ed):
+    if not imgui.begin_popup("tl_point"):
+        return
+    li, pid = ed["menu"] or (None, None)
+    lanes = ed["tl"]["lanes"]
+    p = next((q for q in lanes[li]["points"] if id(q) == pid), None) if li is not None and li < len(lanes) else None
+    if p is None:
+        imgui.close_current_popup()
+        imgui.end_popup()
+        return
+    imgui.text_colored(DIM, "From this point to the next:")
+    for seg, text in TL_SEG_NAMES.items():
+        if imgui.menu_item_simple(text, "", p[2] == seg):
+            p[2] = seg
+            tl_changed(app)
+    imgui.separator()
+    if imgui.menu_item_simple(f"{fa.ICON_FA_TRASH}   Delete point"):
+        lanes[li]["points"].remove(p)
+        tl_changed(app)
+    imgui.end_popup()
+
+
 def tile_menu_key(mn, mx, tile_hovered):
     """A small drop-down key in a look tile's lower-right corner: opens the same menu as right-clicking the tile.
     Call last for the tile (after its context menu), inside its ID scope; leaves the layout as the tile left it."""
@@ -4401,7 +4802,7 @@ def tile_menu_key(mn, mx, tile_hovered):
         imgui.open_popup("tilemenu")
     hov = imgui.is_item_hovered()
     if hov:
-        imgui.set_tooltip("Look menu: cue, transition, overwrite, export, thumbnail, delete (or right-click the tile)")
+        imgui.set_tooltip("Look menu: cue, transition, timeline, overwrite, export, thumbnail, delete (or right-click the tile)")
     dl = imgui.get_window_draw_list()
     b = V(a.x + d, a.y + d)
     dl.add_rect_filled(a, b, u32(alpha(BEZEL, .85 if hov else .6)), 3)
@@ -4514,6 +4915,8 @@ def tiles(app, panel_h, with_deck=True):
                 app.cue(None if app.cued == name else name)
             if imgui.selectable(f"{fa.ICON_FA_WAND_MAGIC_SPARKLES}   Transition...", False)[0]:
                 S.meta_open = name
+            if imgui.selectable(f"{fa.ICON_FA_TIMELINE}   Timeline...", False)[0]:
+                open_timeline(app, name)
             if imgui.selectable(f"{fa.ICON_FA_FLOPPY_DISK}   Overwrite with current look", False)[0]:
                 app.save_preset(name)
             if imgui.selectable(f"{fa.ICON_FA_FILE_EXPORT}   Export this look...", False)[0]:

@@ -2257,6 +2257,54 @@ class App:
         self.lane_keys = {(ln["effect"], ln["key"]) for ln in tl.get("lanes", [])
                           if ln.get("mode", "value") == "value" and not ln.get("mute")} if tl else set()
 
+    def edit_timeline(self, name, tl):
+        """The timeline editor changed look `name`'s timeline (None: removed it). Keep it in the look file; if the
+        look is on air, play the new version from where it is (a new timeline starts now)."""
+        path = os.path.join(PRESET_DIR, name + ".json")
+        try:
+            with open(path) as fh:
+                data = json.load(fh)
+            if not isinstance(data, dict):
+                return
+            if tl:
+                data["timeline"] = tl
+            else:
+                data.pop("timeline", None)
+            save_json(path, data)
+        except (OSError, ValueError):
+            self.flash(f"Couldn't save the timeline of '{name}'", 4)
+        if name != self.current_preset:
+            return
+        self.timeline = tl or None
+        if not tl:
+            self.playhead, self.lane_keys = None, set()
+            return
+        if self.playhead is None:
+            self.start_timeline(tl)
+            return
+        self.playhead.tl = tl
+        self.lane_keys = {(ln["effect"], ln["key"]) for ln in tl.get("lanes", [])
+                          if ln.get("mode", "value") == "value" and not ln.get("mute")}
+
+    def look_timeline(self, name):
+        """(a look's timeline or None, its effect ids in chain order) - from the effects on air for the look on air,
+        else from its file."""
+        if name == self.current_preset:
+            return self.timeline, [f.id for f in walk(self.pipe.order) if not isinstance(f, Group) and not f.removing]
+        try:
+            with open(os.path.join(PRESET_DIR, name + ".json")) as fh:
+                data = clean_look(json.load(fh))
+        except (OSError, ValueError):
+            return None, []
+
+        def ids(entries):
+            for e in entries:
+                if e.get("group"):
+                    yield from ids(e.get("children", []))
+                elif "id" in e:
+                    yield e["id"]
+        return data.get("timeline"), list(ids(data.get("effects", [])))
+
     def timeline_step(self, t):
         """Once a frame, after the waves: the look's lanes set their sliders; a look fading out after its outro
         started keeps playing it on its own effects."""

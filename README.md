@@ -237,6 +237,25 @@ and Cut looks fade as Dissolve under the fader. Take mid-fade finishes the fade 
 another look, or cueing a different one, puts the on-air look back. MIDI learn covers the crossfader, Take and
 Cue next / previous; with Button lights on, Take lights up while something is cued.
 
+## Look timelines
+A look can have a **timeline** that moves its sliders over time, in bars on the tempo clock (or seconds). Open it
+from a look tile's ▾ menu (or right-click) > **Timeline...**; *Make a timeline* gives it one, 8 bars long.
+- **Lanes:** *+ Lane* picks an effect in the look and one of its sliders (the same ones its card can automate).
+  Click a lane to add a point, drag a point to move it (it snaps to the *Grid*; hold Shift to place it freely),
+  right-click a point to choose how it gets to the next one - *Ramp* (a straight line), *Ease* (smooth in and out)
+  or *Hold, then jump* - or to delete it. The eye mutes a lane, × removes it. A slider with a lane follows the lane,
+  not its wave.
+- **Intro / loop / outro:** drag the two markers on the ruler. The intro plays once when the look comes on, the loop
+  repeats while it stays on, and the outro plays when it leaves. *Whole loop* (no markers) just repeats.
+- **Leaving:** Take, a tile click, previous / next, MIDI and auto-play all wait for the outro. *On leave: Finish the
+  pass* plays the loop to its end first; *Jump to outro* starts it at once (timed to end on the launch beat, bar or
+  phrase when *launch* is set). The next look comes in so its transition overlaps the end of the outro, while the old
+  look plays its outro out as it fades. The crossfader, random auto-play and firing the same look skip the outro.
+- **Auto-play** stays on a timeline look for whole loop passes: *Auto-play* in the editor sets how many (0: as many
+  as fit the playlist's *every*).
+- The timeline is saved in the look, so exporting and importing a look keeps it. Changes save as you make them, and
+  if the look is on air you see them straight away, with the playhead moving across the lanes.
+
 ## Mirror Slice
 Mirrors the picture (left-right, up-down or both, as a 2x2 grid), cuts it into strips and lays them outside-in
 (1, last, 2, second-to-last...), first across, then down: a live version of the Mirror Slice image tool. *Columns*

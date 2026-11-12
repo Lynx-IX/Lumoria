@@ -413,5 +413,89 @@ class OutroKey(Handover):
         self.assertEqual(f.fired, [("C", 11 * 4)])
 
 
+class Recording(unittest.TestCase):
+    """Armed, a slider moved by hand writes its lane at the playhead; the take is tidied and kept when it stops."""
+
+    def make(self, lanes=None):
+        import app
+        fake = types.SimpleNamespace()
+        for name in ("record_value", "rec_step", "rec_end", "rec_end_all", "set_lane_keys", "set_tl_recording",
+                     "resync_bar", "start_timeline"):
+            setattr(fake, name, (lambda fn: (lambda *a, **k: fn(fake, *a, **k)))(app.App.__dict__[name]))
+        clock = tempo.Tempo()
+        clock.bpm = 120.0
+        fake.tempo, fake.current_preset = clock, "A"
+        fake.tl_recording, fake.rec_touch, fake.lane_hold, fake.tl_rev = True, {}, {}, 0
+        fake.timeline = tl(length=4.0, lanes=lanes or [])
+        fake.timeline_name = "A"
+        fake.playhead = T.Playhead(fake.timeline, beat=0.0, t=0.0)
+        fake.saved = []
+        fake.edit_timeline = lambda name, tl_: fake.saved.append((name, json.loads(json.dumps(tl_))))
+        fake.fx = types.SimpleNamespace(id="kaleido", removing=False)
+        return fake
+
+    def sweep(self, f, beats, values, key="amt"):
+        """Move the slider through `values`, one per step across `beats` (16 steps a beat)."""
+        for i, v in enumerate(values):
+            f.tempo.phase = beats[0] + (beats[1] - beats[0]) * i / max(1, len(values) - 1)
+            f.record_value(f.fx, key, v, f.tempo.phase / 2)   # (120 BPM: 2 beats a second)
+            f.rec_step(f.tempo.phase / 2)
+
+    def test_a_take_makes_a_lane(self):
+        f = self.make()
+        self.sweep(f, (0, 4), [i / 64 for i in range(65)])     # a straight ramp 0 -> 1 over bar 1
+        self.assertEqual([ln["key"] for ln in f.timeline["lanes"]], ["amt"])
+        self.assertIn(("kaleido", "amt"), f.lane_keys)
+        f.rec_step(100.0)                                      # still for a while: the take ends
+        pts = f.timeline["lanes"][0]["points"]
+        self.assertLessEqual(len(pts), 3)                      # a straight line needs only its ends
+        self.assertAlmostEqual(pts[0][1], 0.0)
+        self.assertAlmostEqual(pts[-1][0], 1.0)
+        self.assertAlmostEqual(pts[-1][1], 1.0)
+        self.assertEqual(f.saved[-1][0], "A")                  # kept in the look
+        self.assertEqual(f.tl_rev, 1)
+        self.assertNotIn(("kaleido", "amt"), f.lane_hold)      # the lane plays again
+
+    def test_a_take_replaces_what_it_passes_over(self):
+        old = [[0.0, 0.5, "ramp"], [1.0, 0.5, "ramp"], [2.0, 0.5, "ramp"], [3.0, 0.5, "ramp"]]
+        f = self.make([dict(effect="kaleido", key="amt", mode="value", mute=False, points=old)])
+        f.set_lane_keys(f.timeline)
+        self.sweep(f, (4, 8), [0.9] * 33)                      # hold it at 0.9 through bar 2 (pos 1..2)
+        self.assertEqual(f.lane_hold[("kaleido", "amt")], float("inf"))   # the lane doesn't fight the hand
+        f.rec_step(100.0)
+        pts = f.timeline["lanes"][0]["points"]
+        self.assertEqual([p[0] for p in pts if p[0] < 0.99], [0.0])        # before the take: untouched
+        self.assertTrue(all(abs(p[1] - 0.9) < 1e-9 for p in pts if 0.99 < p[0] < 2.01))   # during: the take
+        self.assertEqual([p for p in pts if p[0] > 2.5], [[3.0, 0.5, "ramp"]])   # after: untouched
+
+    def test_disarmed_records_nothing(self):
+        f = self.make()
+        f.tl_recording = False
+        self.sweep(f, (0, 4), [0.2, 0.4])
+        self.assertEqual(f.timeline["lanes"], [])
+
+    def test_simplify(self):
+        line = [[i / 10, i / 10, "ramp"] for i in range(11)]
+        self.assertEqual(T.simplify(line), [line[0], line[-1]])
+        bend = [[0, 0.0, "ramp"], [1, 1.0, "ramp"], [2, 0.0, "ramp"]]
+        self.assertEqual(T.simplify(bend), bend)
+
+
+class BeatOne(unittest.TestCase):
+    def test_timelines_start_on_beat_1_and_follow_a_resync(self):
+        import app
+        fake = types.SimpleNamespace(rec_touch={}, current_preset="A")
+        for name in ("start_timeline", "set_lane_keys", "resync_bar"):
+            setattr(fake, name, (lambda fn: (lambda *a, **k: fn(fake, *a, **k)))(app.App.__dict__[name]))
+        fake.tempo = tempo.Tempo()
+        fake.tempo.phase = 9.2            # beat 2 of bar 3 (bar 1 starts at beat 0)
+        fake.start_timeline(song())
+        self.assertEqual(fake.playhead.start_beat, 8)    # the nearest beat 1
+        fake.tempo.phase = 12.9           # the music's downbeat is really here, a beat later: B on it
+        fake.resync_bar()
+        self.assertEqual(fake.tempo.bar_origin, 13)
+        self.assertEqual(fake.playhead.start_beat, 9)   # the timeline's bars moved with it (by the nearest way)
+
+
 if __name__ == "__main__":
     unittest.main()

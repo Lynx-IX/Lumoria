@@ -133,6 +133,35 @@ class Playhead:
         return e + ((min(ahead) if ahead else end) - pos)
 
 
+def simplify(points, tol=0.02):
+    """A recorded lane, tidied (Douglas-Peucker): only the points needed to keep its shape within tol (a share of
+    the lane's own range - a couple of MIDI steps) stay, so a take is easy to edit. Holds and eases always stay."""
+    if len(points) < 3:
+        return points
+    vals = [p[1] for p in points]
+    eps = tol * ((max(vals) - min(vals)) or 1.0)
+    keep = [False] * len(points)
+    keep[0] = keep[-1] = True
+    stack = [(0, len(points) - 1)]
+    while stack:
+        i, j = stack.pop()
+        a, b = points[i], points[j]
+        worst, k = -1.0, None
+        for m in range(i + 1, j):
+            p = points[m]
+            if p[2] != "ramp":   # a shape someone chose: keep it
+                keep[m] = True
+            span = b[0] - a[0]
+            guess = a[1] if span <= 0 else a[1] + (b[1] - a[1]) * (p[0] - a[0]) / span
+            d = abs(p[1] - guess)
+            if d > worst:
+                worst, k = d, m
+        if k is not None and worst > eps:
+            keep[k] = True
+            stack += [(i, k), (k, j)]
+    return [p for p, kp in zip(points, keep) if kp]
+
+
 def plan_outro(ph, beat, t, jump=False, grid=0.0, bar_origin=0.0, overlap=0.0):
     """When a look is told to leave: (when its outro starts, when the next look should start coming in), both in the
     playhead's elapsed time (the timeline's unit), or None if the timeline has no outro.

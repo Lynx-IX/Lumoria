@@ -224,7 +224,9 @@ Source: **Audio** locks to the music's own tempo and beat. It needs a few second
 through quiet parts. If the beat feels twice too fast or too slow (drum & bass, trap), set *Feel* to Half time or
 Double. **Tap** (`T`, the TAP button or a MIDI pad),
 **Manual** BPM, or **MIDI clock** from a DAW (send clock to a MIDI port Lumoria can see; for a DAW on this PC a
-virtual port such as loopMIDI; Start = beat 1). `B` makes the current beat beat 1 of the bar. Transition times,
+virtual port such as loopMIDI; Start = beat 1). **Beat 1**: press `B`, the **1** key beside TAP, or a MIDI pad on
+the music's downbeat to make that beat beat 1 of the bar; a look's timeline moves with it, so its bars stay the
+music's bars (timelines also start on the nearest beat 1). Transition times,
 a look's stay time and the auto-play interval can be in **seconds, beats or bars**. **Launch** (now / beat /
 bar / 4 / 8 / 16) makes a fired look wait for the next beat, bar, or 4, 8 or 16-bar phrase, with a countdown on
 its tile. Phrases count from beat 1, so press `B` on a downbeat if they land in the wrong place.
@@ -262,6 +264,11 @@ tab); *Make a timeline* gives it one, 8 bars long.
   outro now, into the cued look or the next one.
 - **Taking over:** grab a slider that a lane moves - on its card, or with its MIDI control - and it's yours until the
   lane's next point (or the end of the section playing), then the lane takes it back.
+- **Recording:** press **Rec** in the editor (or its MIDI pad) while the look plays, then play your MIDI knobs and
+  faders (or drag sliders on the cards): each one writes its lane at the playhead - a new lane if it has none -
+  replacing the points it passes over, like touch automation in a DAW. A take ends when you let go for a moment: it's
+  tidied to the few points that keep its shape, saved in the look, and Ctrl+Z undoes it. The loop keeps going round,
+  so you can record over a pass again. The playhead is red while recording.
 - **Intro / loop / outro:** drag the two markers on the ruler. The intro plays once when the look comes on, the loop
   repeats while it stays on, and the outro plays when it leaves. *Whole loop* (no markers) just repeats.
 - **Leaving:** Take, a tile click, previous / next, MIDI and auto-play all wait for the outro. *On leave: Finish the

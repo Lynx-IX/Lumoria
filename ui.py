@@ -1461,7 +1461,7 @@ def shortcuts(app):
     if pressed(imgui.Key.t):
         app.tempo.tap(glfw.get_time())
     if pressed(imgui.Key.b):
-        app.tempo.resync_bar()
+        app.resync_bar()
     if pressed(imgui.Key.m):
         app.flip_preview = not app.flip_preview
     if pressed(imgui.Key.o):
@@ -3287,7 +3287,9 @@ def automation_menu(app, f, key, lo, hi, name):
     a = f.autos.get(key)
     if S.grabbed == f"##{key}":   # moved by hand: a timeline lane on it lets go until its next point
         S.grabbed = None
-        if (f.id, key) in app.lane_keys:
+        if app.tl_recording and app.playhead is not None and key != "centre":   # recording: it writes its lane
+            app.record_value(f, key, lane_current(f, key, lo, hi), glfw.get_time())
+        elif (f.id, key) in app.lane_keys:
             app.lane_takeover(f.id, key, glfw.get_time())
     if a and not S.auto_buttons:
         mn, mx = imgui.get_item_rect_min(), imgui.get_item_rect_max()
@@ -4201,6 +4203,14 @@ def tempo_strip(app, nxt=None):
                    "Tap on the beat a few times to set the tempo [T]") and not app.midi_learn:
         tp.tap(glfw.get_time())
     midi_spot(app, ("app", "tap"))
+    step(sc(34), 4)
+    one = tp.beat_in_bar() == 0 and (tp.phase % 1.0) < 0.35
+    if neon_button(f"1##beat1", CYAN, V(sc(34), 0), one,
+                   "Beat 1 [B]: press it on the music's downbeat to make that beat 1 of the bar.\n"
+                   "Phrase launches (4 / 8 / 16) count from it, and a look's timeline lines its bars up with it.")\
+            and not app.midi_learn:
+        app.resync_bar()
+    midi_spot(app, ("app", "resync"))
     # launch quantize too, if there's room before the buttons on the right (always in Settings > Tempo)
     if nxt is None:
         room = (imgui.get_window_width() - 16 - sc(130)
@@ -4266,7 +4276,7 @@ def tempo_section(app):
     imgui.same_line(0, 6)
     if neon_button(f"{fa.ICON_FA_1}  Beat 1  [B]##tres", DIM, V(bw, 0),
                    tip="Make this beat beat 1 of the bar (or the nearest one)") and not app.midi_learn:
-        tp.resync_bar()
+        app.resync_bar()
     midi_spot(app, ("app", "resync"))
     p = imgui.get_cursor_screen_pos()
     beat_lights(app, imgui.get_window_draw_list(), p.x + sc(8), p.y + sc(10), 4, 16)
@@ -4597,6 +4607,22 @@ def tl_keys(app):
 
 
 
+def timeline_follow(app, ed):
+    """While the editor's look is on air, it edits the very timeline that plays; a recorded take shows up as it's
+    made, and counts as one undo step once it's done."""
+    if not on_air(app, ed) or app.timeline is None or ed["drag"]:
+        return
+    if ed.get("rev") != app.tl_rev:
+        if ed.get("rev") is not None:
+            now = json.dumps(app.timeline)
+            if now != ed["last"]:
+                ed["hist"] = (ed["hist"] + [ed["last"]])[-200:]
+                ed["future"], ed["last"] = [], now
+        ed["rev"] = app.tl_rev
+    if ed["tl"] is not app.timeline:
+        ed["tl"] = app.timeline
+
+
 def timeline_window(app, W, H, tb):
     """The timeline of one look: a ruler in bars with the intro / loop / outro markers, and a lane per slider, made of
     points joined by ramps, eases or holds. Click a lane to add a point, drag one to move it (Shift: off the grid),
@@ -4619,6 +4645,7 @@ def timeline_window(app, W, H, tb):
     imgui.pop_style_color(2)
     S.tl_hot = imgui.is_window_focused(imgui.FocusedFlags_.root_and_child_windows)
     S.tl_wheel = False
+    timeline_follow(app, ed)
     if not keep:
         S.tl = None
         S.tl_hot = False
@@ -4694,7 +4721,18 @@ def timeline_header(app, ed):
             tl.pop("intro_end", None)
             tl.pop("loop_end", None)
         tl_changed(app)
-    # second row: on leave, lanes, undo / redo, the view, where it is
+    # second row: record, on leave, lanes, undo / redo, the view, where it is
+    live = on_air(app, ed) and app.playhead is not None
+    rec = app.tl_recording and live
+    if neon_button(f"{fa.ICON_FA_CIRCLE}  Rec##tlrec", RED, V(0, 0), rec, flat=not rec,
+                   tip="Record: while this look plays, moving a slider - with MIDI or on its card - writes its lane\n"
+                       "at the playhead (a new lane if it has none), replacing the points it passes, like touch\n"
+                       "automation in a DAW. Let go and the lane plays again. Ctrl+Z undoes a take."
+                   if live else "Record: fire this look first (it records while it plays)") and live \
+            and not app.midi_learn:
+        app.set_tl_recording(not app.tl_recording)
+    midi_spot(app, ("app", "tl_record"))
+    imgui.same_line(0, 18)
     if has:
         imgui.align_text_to_frame_padding()
         imgui.text_colored(DIM, "On leave")
@@ -4942,7 +4980,8 @@ def timeline_body(app, ed):
         pos, section, _n = app.playhead.where(app.tempo.phase, glfw.get_time())
         x = x_of(min(pos, length))
         if gx0 <= x <= gx1:
-            dl.add_line(V(x, p0.y), V(x, bot), u32(WHITE if section != "outro" else MAGENTA), 2)
+            dl.add_line(V(x, p0.y), V(x, bot), u32(RED if app.tl_recording else WHITE if section != "outro"
+                                                   else MAGENTA), 2)
     imgui.set_cursor_screen_pos(V(p0.x, bot + 4))
     imgui.dummy(V(1, 4))
     # a drag ends on release: points are kept in order, and the change is saved

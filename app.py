@@ -1244,6 +1244,9 @@ class App:
         self.timeline_name = None    # the look whose timeline is playing (still known after a MIDI tweak)
         self.depth_keys = set()      # (effect id, key) whose wave's swing a depth lane sets
         self.lane_hold = {}          # (effect id, key) -> elapsed time until its lane takes the slider back
+        self.tl_recording = False    # armed: moving a slider by hand writes its lane (record_value)
+        self.rec_touch = {}          # (effect id, key) -> the touch being recorded on it now
+        self.tl_rev = 0              # goes up each time a recorded touch changes the timeline
         # cue and crossfader: a look lined up without firing, then Taken (on the launch beat / bar / phrase) or
         # faded in by hand. The fader's direction flips each time it brings a look fully in, like A / B decks.
         self.cued = None
@@ -1725,7 +1728,9 @@ class App:
                 "cue_next": ("trigger", 0, 1, None, lambda: self.cue_step(1), "Cue next look"),
                 "cue_prev": ("trigger", 0, 1, None, lambda: self.cue_step(-1), "Cue previous look"),
                 "record": ("trigger", 0, 1, None, self.toggle_record, "Record on / off"),
-                "resync": ("trigger", 0, 1, None, self.tempo.resync_bar, "Beat 1 (re-sync bar)"),
+                "resync": ("trigger", 0, 1, None, lambda: self.resync_bar(), "Beat 1 (re-sync bar)"),
+                "tl_record": ("toggle", 0, 1, lambda: self.tl_recording, lambda v: self.set_tl_recording(v),
+                              "Record into the look's timeline"),
             }.get(key)
         f = next((f for f in p.effects if f.id == scope), None)
         if f is None:
@@ -1840,7 +1845,12 @@ class App:
                     put(not get())
             elif ctl == "trigger" and pressed:
                 put()
-            if tuple(m["target"]) in self.lane_keys:   # a slider the look's timeline moves: yours for now
+            if self.tl_recording and ctl == "range" and get is not None:   # armed: it writes its lane
+                fx = next((x for x in walk(self.pipe.order) if not isinstance(x, Group) and x.id == m["target"][0]
+                           and not x.removing), None)
+                if fx is not None:
+                    self.record_value(fx, m["target"][1], get(), t)
+            elif tuple(m["target"]) in self.lane_keys:   # a slider the look's timeline moves: yours for now
                 self.lane_takeover(m["target"][0], m["target"][1], t)
             if m["target"][0] not in ("app", "look"):
                 self.current_preset = None
@@ -2275,13 +2285,90 @@ class App:
         self.start_timeline(data.get("timeline"), name)
 
     def start_timeline(self, tl, name=None):
-        """The look now on air brings its timeline (or none): it starts from the top, on the tempo clock."""
+        """The look now on air brings its timeline (or none): it starts from the top, on the tempo clock - on the
+        nearest beat 1, so its bars are the music's bars."""
+        if self.rec_touch:   # a take still going on the look before: keep it first
+            self.rec_end_all(glfw.get_time())
         self.timeline_name = (name or self.current_preset) if tl else None
-        self.lane_hold = {}
+        self.lane_hold, self.rec_touch = {}, {}
         self.timeline = tl or None
-        self.playhead = (timeline.Playhead(tl, self.tempo.phase, glfw.get_time(), self.tempo.beats_per_bar)
+        tp = self.tempo
+        bpb = max(1, tp.beats_per_bar)
+        start = tp.bar_origin + math.floor((tp.phase - tp.bar_origin) / bpb + 0.5) * bpb
+        self.playhead = (timeline.Playhead(tl, start, glfw.get_time(), bpb)
                          if tl and tl.get("lanes") is not None else None)
         self.set_lane_keys(tl)
+
+    def resync_bar(self):
+        """Beat 1 (B, its key, a MIDI pad): the nearest beat becomes beat 1 of the bar, and a timeline playing moves
+        with it, so its bars stay the music's bars."""
+        tp = self.tempo
+        tp.resync_bar()
+        ph = self.playhead
+        if ph is not None and ph.tl.get("unit") != "seconds":
+            bpb = max(1, tp.beats_per_bar)
+            ph.start_beat = tp.bar_origin + math.floor((ph.start_beat - tp.bar_origin) / bpb + 0.5) * bpb
+
+    # --- recording into the look's timeline: armed, moving a slider (MIDI or its card) writes its lane
+    def set_tl_recording(self, on):
+        self.tl_recording = bool(on)
+        if not on:
+            self.rec_end_all(glfw.get_time())
+
+    def record_value(self, f, key, v, t):
+        """While recording, a slider moved by hand writes its lane at the playhead (a new lane if it has none):
+        the points it passes over are replaced, as on a DAW's automation in touch mode."""
+        ph, tl = self.playhead, self.timeline
+        if not self.tl_recording or ph is None or tl is None or not timeline.valid_key(key):
+            return
+        pos, _section, _n = ph.where(self.tempo.phase, t)
+        lane = next((ln for ln in tl["lanes"] if ln["effect"] == f.id and ln["key"] == key
+                     and ln.get("mode", "value") == "value"), None)
+        if lane is None:
+            lane = dict(effect=f.id, key=key, mode="value", mute=False, points=[])
+            tl["lanes"].append(lane)
+            self.set_lane_keys(tl)
+        touch = self.rec_touch.get((f.id, key))
+        step = 1 / 32 if tl.get("unit") != "seconds" else 0.05   # a point at most every 1/32 bar (or 50 ms)
+        pts = lane["points"]
+        if touch is None or pos < touch["pos"] - 1e-9:   # a new touch, or the loop came round
+            pts[:] = [p for p in pts if abs(p[0] - pos) > step / 2]
+        else:   # the stretch it moved over since the last value is replaced
+            pts[:] = [p for p in pts if not (touch["pos"] + 1e-9 < p[0] <= pos + step / 2)]
+            if pos - touch["pos"] < step:   # too soon after the last point: wait (the take's end writes it)
+                self.rec_touch[(f.id, key)] = dict(touch, t=t, waiting=(pos, v))
+                return
+        p = [pos, v, "ramp"]
+        pts.append(p)
+        pts.sort(key=lambda q: q[0])
+        self.rec_touch[(f.id, key)] = dict(pos=pos, t=t, point=p, lo=v, hi=v)
+        self.lane_hold[(f.id, key)] = float("inf")   # the lane doesn't fight the hand while it's moving
+
+    def rec_step(self, t):
+        """Once a frame: a touch that's been still for a moment ends - its lane is tidied, kept and played again."""
+        for k in [k for k, tc in self.rec_touch.items() if t - tc["t"] > 0.35]:
+            self.rec_end(k)
+
+    def rec_end_all(self, t):
+        for k in list(self.rec_touch):
+            self.rec_end(k)
+
+    def rec_end(self, k):
+        touch = self.rec_touch.pop(k, None)
+        self.lane_hold.pop(k, None)
+        tl = self.timeline
+        lane = next((ln for ln in (tl or {}).get("lanes", []) if (ln["effect"], ln["key"]) == k
+                     and ln.get("mode", "value") == "value"), None)
+        if lane is not None:
+            if touch and touch.get("waiting"):   # where the hand stopped
+                pos, v = touch["waiting"]
+                lane["points"] = [p for p in lane["points"] if not (touch["pos"] + 1e-9 < p[0] <= pos + 1e-9)]
+                lane["points"].append([pos, v, "ramp"])
+                lane["points"].sort(key=lambda q: q[0])
+            lane["points"] = timeline.simplify(lane["points"])
+            self.tl_rev += 1   # the editor (if open on this look) picks it up as one undo step
+            if self.timeline_name:
+                self.edit_timeline(self.timeline_name, tl)
 
     def set_lane_keys(self, tl):
         lanes = [ln for ln in (tl or {}).get("lanes", []) if not ln.get("mute")]
@@ -2928,6 +3015,8 @@ class App:
             name, self.pending_look = self.pending_look[0], None
             self.load_preset(name, now=True)
         self.leave_step(t)
+        if self.rec_touch:
+            self.rec_step(t)
         lv = self.audio.level
         b["bands"] = (lv["bass"] * self.gain, lv["mid"] * self.gain, lv["high"] * self.gain)
         b["hits"] = (lv["kick"], lv["snare"], lv["hat"], lv["accent"])

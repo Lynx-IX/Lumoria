@@ -45,6 +45,7 @@ import midi
 import recorder
 import sources
 import tempo
+import timeline
 from sources import (CameraSource, VideoFileSource, describe, list_cameras, list_screens, list_windows,
                      open_source)
 
@@ -1235,6 +1236,9 @@ class App:
         self.tempo = tempo.Tempo()   # the beat clock (tempo.py): beat effects, auto-play, look timing in beats/bars
         self.quantize = 0            # launching a look: 0 at once, 1 on the next beat, 2 on the next bar
         self.pending_look = None     # (name, beat it starts on) while a quantized launch waits
+        self.timeline = None         # the look on air's timeline (timeline.py), or None
+        self.playhead = None         # where that look is in it: started when the look comes on
+        self.lane_keys = set()       # (effect id, key) its lanes move: their waves wait meanwhile
         # cue and crossfader: a look lined up without firing, then Taken (on the launch beat / bar / phrase) or
         # faded in by hand. The fader's direction flips each time it brings a look fully in, like A / B decks.
         self.cued = None
@@ -1545,6 +1549,7 @@ class App:
         data, self.held_session = self.held_session, None
         if restore and data:
             self.apply_look(data)
+            self.start_timeline(data.get("timeline"))
         self.unclean = False
 
     def clean_exit(self):
@@ -2088,6 +2093,8 @@ class App:
             return
         data = dict(version=2, band=self.band, gain=self.gain,
                     effects=[self.item_to_dict(f) for f in self.pipe.order if not f.removing])
+        if self.timeline:
+            data["timeline"] = self.timeline
         save_json(os.path.join(PRESET_DIR, name + ".json"), data)
         if name not in self.playlist:
             self.playlist.append(name)
@@ -2163,6 +2170,30 @@ class App:
             self.crossfade_look(data, style, secs)
         self.current_preset = name
         self.preset_t = glfw.get_time()
+        self.start_timeline(data.get("timeline"))
+
+    def start_timeline(self, tl):
+        """The look now on air brings its timeline (or none): it starts from the top, on the tempo clock."""
+        self.timeline = tl or None
+        self.playhead = timeline.Playhead(tl, self.tempo.phase, glfw.get_time(), self.tempo.beats_per_bar)             if tl and tl.get("lanes") is not None else None
+        self.lane_keys = {(ln["effect"], ln["key"]) for ln in tl.get("lanes", [])
+                          if ln.get("mode", "value") == "value" and not ln.get("mute")} if tl else set()
+
+    def timeline_step(self, t):
+        """Once a frame, after the waves: the look's lanes set their sliders."""
+        ph = self.playhead
+        if ph is None:
+            return
+        ph.beats_per_bar = self.tempo.beats_per_bar
+        vals = ph.values(self.tempo.phase, t)
+        if not vals:
+            return
+        for f in walk(self.pipe.order):
+            if isinstance(f, Group) or f.removing:
+                continue
+            for (eid, key), v in vals.items():
+                if eid == f.id:
+                    self.set_auto_value(f, key, v)
 
     @staticmethod
     def settings_of(f):
@@ -2304,6 +2335,8 @@ class App:
             for key, a in f.autos.items():
                 if a.get("paused"):   # held where it is (a MIDI toggle or the menu), settings kept
                     continue
+                if (f.id, key) in self.lane_keys:   # the look's timeline has this slider: its lane moves it
+                    continue
                 rate = max(a["rate"], 0.01)
                 raw = t / rate if a["unit"] == 0 else tp.phase / (rate * (1 if a["unit"] == 1 else tp.beats_per_bar))
                 cyc = raw + a.get("phase", 0.0)
@@ -2439,7 +2472,8 @@ class App:
                     source=self.source_desc, extra_sources=self.extra_desc,
                     mask=dict(quality=self.mask_quality, refine=p.refine, stability=p.stability,
                               plate=p.plate_strength, plate_delay=self.plate_delay), spout=self.spout is not None,
-                    effects=[self.item_to_dict(f) for f in p.order if not f.removing])
+                    effects=[self.item_to_dict(f) for f in p.order if not f.removing],
+                    **({"timeline": self.timeline} if self.timeline else {}))
 
     def save_session(self):
         if self.held_session is not None:   # don't overwrite the setup we're offering to restore
@@ -2469,6 +2503,7 @@ class App:
             self.held_session = data
         else:
             self.apply_look(data)
+            self.start_timeline(data.get("timeline"))
         p = self.pipe
         p.transition = data.get("transition", p.transition)
         p.trans_time, p.wave_rate = data.get("trans_time", p.trans_time), data.get("wave_rate", p.wave_rate)
@@ -2744,6 +2779,7 @@ class App:
         self.plate_tick(t)
         self.morph_step(t)
         self.automate(t)
+        self.timeline_step(t)
         self.pipe.render(t, dt, level, self.source is None)
         if seg and seg.loaded:
             # copy a frame every frame without waiting; hand the previous one over when the AI is free

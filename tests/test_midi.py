@@ -65,6 +65,7 @@ class FakeApp:
         self.take = self.cue_step = self.set_xfader = None
         self.cued = self.xf_live = None
         self.xfader = 0.0
+        self.lane_keys = set()   # sliders a look's timeline moves (none here)
         self.midi = midi.MidiIn()   # never opened: messages are put on its queue by hand
         self.midi_map = self.load_midi_map()
         self.midi_learn, self.learn_target, self.midi_seen, self.midi_cc = False, None, 0.0, {}

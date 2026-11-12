@@ -1,7 +1,11 @@
 # Look timelines: plan
 
-Status: plan, not built yet. To be built on its own branch (`claude/look-timelines`) and tried with a test copy
-before anything lands on main.
+Status: being built on the branch `claude/look-timelines` (worktree `.claude/worktrees/look-timelines`), tried with
+a test copy before anything lands on main.
+- Step 1 (engine) done: `timeline.py` (lane values, sections, Playhead, cleaning), looks save / load / export their
+  `timeline`, `lookcheck` cleans it, the App starts it when a look comes on and applies value lanes each frame after
+  the waves (a slider with a lane skips its wave). Tests: `tests/test_timeline.py`. No editor yet: a timeline only
+  comes from a look file.
 
 ## The idea in one paragraph
 

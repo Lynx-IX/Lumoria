@@ -8,6 +8,8 @@ ValueError only when nothing usable is left.
 import base64
 import math
 
+from timeline import clean_timeline
+
 MAX_ITEMS = 200        # effects and groups in one look, all together
 MAX_DEPTH = 4          # groups inside groups
 MAX_LIST = 64          # options / sliders per effect
@@ -151,6 +153,10 @@ def clean_look(look):
         out["band"] = look["band"] if isinstance(look["band"], (int, str)) and not isinstance(look["band"], bool) else 0
     if "gain" in look:
         out["gain"] = _num(look["gain"], 1.0, 0.0, 10.0)
+    if "timeline" in look:   # lanes that move its sliders over time, in intro / loop / outro (timeline.py)
+        tl = clean_timeline(look["timeline"], _num, _text)
+        if tl:
+            out["timeline"] = tl
     return out
 
 

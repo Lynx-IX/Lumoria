@@ -9,7 +9,7 @@ import unittest
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MODULES = ["app", "ui", "effects", "effects3d", "audio", "tempo", "midi", "shared", "sources", "segment", "recorder",
-           "lookcheck"]
+           "lookcheck", "timeline"]
 
 
 def bound_names(tree):

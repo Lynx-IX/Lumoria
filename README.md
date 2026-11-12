@@ -76,8 +76,9 @@ A welcome window helps pick a camera and gives a five-line tour; a new install s
 They live in `samples/`; the welcome (Settings > About > Show the welcome again) can add any that are missing.
 
 ## The layout
-- **Top bar:** source, resolution/fps, and keys for MIDI learn, Rec, Flip (preview only), Output window, Spout,
-  fullscreen, Virtual cam and the theme palette.
+- **Top bar:** *File* (new, save, import, export, recordings folder, shortcuts) and *Settings* at the left; the
+  readout in the centre (source, resolution, fps, CPU and GPU load); keys for MIDI learn, Rec, Flip (preview only),
+  Output window, Spout, fullscreen and Virtual cam at the right.
 - **Sidebar:** Input, Audio, Effects, Transitions, Output.
 - **Effects:** *+ Add effect* opens the library (searchable, grouped). Each effect in the chain is a card:
   drag the grip to reorder, power to bypass, the **music note** turns listening on (lit) or off (dim; off, the
@@ -121,8 +122,8 @@ They live in `samples/`; the welcome (Settings > About > Show the welcome again)
   back on the next launch, including after *Update ready - restart*. Save a look to keep a setup permanently.
 - **Resizing:** drag the lines between panels; *Interface → UI size* (or Ctrl + mouse wheel) scales all text and
   controls. The layout is remembered in `ui_settings.json`.
-- **Themes:** the palette button at the right of the top bar picks a theme (Console, Neon, Midnight, Analog,
-  Carbon) and the Lights colour. *Interface → Theme keys* can show them as a strip of keys in the top bar instead.
+- **Themes:** *Settings → Interface → Theme* picks a theme (Console, Neon, Midnight, Analog, Carbon), and
+  *Lights* the main light colour.
 - **Logo:** *Interface → Logo* switches between *Original* (the glossy artwork, the default), *Neon* (a redrawn
   crisp version with a white wordmark) and *Neon colour* (gradient wordmark); the window icon follows after a restart.
 

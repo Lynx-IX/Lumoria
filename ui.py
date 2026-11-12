@@ -18,6 +18,7 @@ from imgui_bundle import imgui
 
 import effects as E
 import recorder
+import sysload
 import tempo
 import audio as A
 from audio import list_inputs
@@ -127,8 +128,10 @@ TOPBAR_H, PLAYLIST_SHUT_H, LABEL_W, GAP = 54, 52, 96, 6   # GAP: draggable seam 
 SETTINGS_FILE = os.path.join(DATA, "ui_settings.json")
 LAYOUT_DEFAULTS = dict(sidebar_w=410.0, playlist_h=196.0, playlist_open=True, scale=1.0, card_cols=0,
                        theme="Console", accent=0, header_tint=False, side_tab=0, welcomed=False,
-                       card_warnings=0, logo_look=0, theme_keys=0, fx_view=1, fx_keep=0, fx_layout=0, num_boxes=1, auto_buttons=1)
+                       card_warnings=0, logo_look=0, fx_view=1, fx_keep=0, fx_layout=0, num_boxes=1, auto_buttons=1,
+                       layout=0, panels={}, panels_shut=[])
 CARD_MIN_W = 300   # auto grid: a new column of effect cards appears whenever this much more width fits
+CARD_MAX_W = 720   # an effect card never gets wider than this (long sliders are harder to set finely)
 
 
 class _State:
@@ -138,9 +141,7 @@ class _State:
     theme, accent = "Console", 0   # interface theme (THEMES) and light colour (ACCENTS index)
     header_tint = False            # card headers take on a little of their LED colour
     card_warnings = 0              # "hidden by" notes on cards: 0 full text, 1 icon only, 2 off
-    theme_anchor = None            # bottom-right of the palette button when its popup opened
     windows = []                   # the app's GLFW windows, for title bar colours (set by app.main)
-    theme_keys = 0                 # where the theme keys live: 0 a palette button (top bar, right), 1 a strip after the readout
     logo_look = 0                  # 0 Original artwork, 1 Neon (redrawn, white wordmark), 2 Neon colour (gradient wordmark)
     side_tab = 0                   # sidebar tab: 0 Effects, 1 Settings
     welcomed = False               # the welcome window has been seen (Settings > About shows it again)
@@ -155,7 +156,6 @@ class _State:
     confirm_delete = None          # a look waiting for "Delete it?" to be answered
     show_keys = False              # F1: the keyboard shortcuts sheet
     brand = None                   # (small symbol, large symbol, wordmark) textures from assets/, loaded on first use
-    lcd_end = 0.0                  # where the top bar's readout ends (theme keys go after it)
     thumbs = {}                    # look name -> (texture, file time) for playlist tile thumbnails
     midi_scope = None              # the effect whose controls are being drawn (their MIDI target scope)
     app = None                     # set by draw(), for helpers that need it (MIDI learn in sliders)
@@ -167,6 +167,16 @@ class _State:
     open_lib, lib_target = False, None   # open the effect library; add into this group (None = top)
     meta_open = None               # look name whose transition & timing popup should open
     show_mask = False              # small view of the refined AI mask over the preview
+    layout = 0                     # 0 Classic (fixed sidebar / preview / playlist), 1 Custom (panels you place)
+    panels = {}                    # Custom: panel key -> [x, y, w, h] as fractions of the area under the top bar
+    pdrag = None                   # Custom: the panel move / resize in progress
+    panels_shut = []               # Custom: the panels folded down to their title strip
+    settings_open = False          # the Settings drop-down (under its top-bar button)
+    settings_focus = False
+    settings_btn = None            # the Settings button's rect (min, max), for the drop-down to hang from
+    file_anchor = None             # where the File menu opens (under its button)
+    load = None                    # CPU / GPU load for the top bar readout (sysload.SysLoad, started on first use)
+    flow_first = True              # Custom: the next flow() item starts the panel (no same_line before it)
 
 
 S = _State()
@@ -188,7 +198,10 @@ def load_layout():
     except (OSError, ValueError):
         saved = {}
     for k, v in LAYOUT_DEFAULTS.items():
-        setattr(S, k, type(v)(saved.get(k, v)))
+        try:
+            setattr(S, k, type(v)(saved.get(k, v)))
+        except (TypeError, ValueError):   # a damaged value: its default
+            setattr(S, k, type(v)(v))
 
 
 def save_layout():
@@ -219,6 +232,7 @@ def setup_style():
     S.bold = load(os.path.join(fonts, "Roboto", "Roboto-Bold.ttf"), 16) or S.font
     S.mono = load(os.path.join(fonts, "Inconsolata-Medium.ttf"), 16) or S.font   # readouts, like an LCD
     load_layout()
+    io.config_windows_move_from_title_bar_only = True   # dragging inside the Settings window never moves it
 
     imgui.style_colors_dark()
     s = imgui.get_style()
@@ -263,6 +277,8 @@ def apply_theme(name, accent=0):
         (imgui.Col_.scrollbar_grab_hovered, SCROLL_HI), (imgui.Col_.scrollbar_grab_active, SCROLL_ACT),
         (imgui.Col_.drag_drop_target, MAGENTA), (imgui.Col_.text_selected_bg, alpha(CYAN, .3)),
         (imgui.Col_.nav_cursor, CYAN),
+        (imgui.Col_.resize_grip, CLEAR), (imgui.Col_.resize_grip_hovered, alpha(CYAN, .5)),   # the Settings window
+        (imgui.Col_.resize_grip_active, CYAN),
     ):
         s.set_color_(col, c)
     tint_title_bars()
@@ -634,12 +650,7 @@ def draw(app):
         save_layout()
 
     tb = sc(TOPBAR_H)
-    S.sidebar_w = min(max(S.sidebar_w, sc(280)), max(sc(280), W - 320))
-    S.playlist_h = min(max(S.playlist_h, sc(130)), max(sc(130), H - tb - 220))
-    pl_h = S.playlist_h if S.playlist_open else sc(PLAYLIST_SHUT_H)
-    sw, mid_h = S.sidebar_w, max(50, H - tb - GAP - pl_h)
     panel_flags = imgui.ChildFlags_.always_use_window_padding
-
     imgui.set_cursor_pos(V(0, 0))
     imgui.push_style_color(imgui.Col_.child_bg, PANEL)
     imgui.push_style_var(imgui.StyleVar_.window_padding, V(16, 10))
@@ -650,7 +661,39 @@ def draw(app):
     top_bar(app)
     imgui.end_child()
     imgui.pop_style_var()
+    imgui.pop_style_color()
 
+    if S.layout == 1:
+        imgui.get_window_draw_list().add_line(V(0, tb), V(W, tb), u32(BORDER), 1)
+        custom_layout(app, W, H, tb)   # ends the main window itself, then draws the panels
+    else:
+        classic_layout(app, W, H, tb)
+        imgui.end()
+    settings_window(app, W, H, tb)
+
+    restore_prompt(app)
+    welcome(app)
+    delete_prompt(app)
+    keys_sheet()
+
+    if S.pending_move:   # applied after drawing so lists don't change mid-loop
+        uid, dest, index = S.pending_move
+        S.pending_move = None
+        if (item := app.pipe.find(uid)) is not None and item is not (dest[index] if index is not None
+                                                                       and index < len(dest) else None):
+            app.pipe.move_item(item, dest, index)
+
+
+def classic_layout(app, W, H, tb):
+    """Today's fixed layout: the sidebar on the left, the preview beside it, the playlist along the bottom."""
+    io = imgui.get_io()
+    S.sidebar_w = min(max(S.sidebar_w, sc(280)), max(sc(280), W - 320))
+    S.playlist_h = min(max(S.playlist_h, sc(130)), max(sc(130), H - tb - 220))
+    pl_h = S.playlist_h if S.playlist_open else sc(PLAYLIST_SHUT_H)
+    sw, mid_h = S.sidebar_w, max(50, H - tb - GAP - pl_h)
+    panel_flags = imgui.ChildFlags_.always_use_window_padding
+
+    imgui.push_style_color(imgui.Col_.child_bg, PANEL)
     imgui.set_cursor_pos(V(0, tb))
     imgui.begin_child("sidebar", V(sw, mid_h), panel_flags)
     sidebar(app)
@@ -679,29 +722,452 @@ def draw(app):
     if splitter("hsplit", V(0, tb + mid_h), V(W, GAP), imgui.MouseCursor_.resize_ns, dl, vertical=False,
                 enabled=S.playlist_open):
         S.playlist_h -= io.mouse_delta.y
+
+
+# ---------------------------------------------------------------- custom layout (floating panels that snap)
+
+PANELS = (("inputs", "Inputs", fa.ICON_FA_VIDEO), ("effects", "Effects", fa.ICON_FA_LAYER_GROUP),
+          ("preview", "Preview", fa.ICON_FA_DISPLAY), ("playlist", "Playlist", fa.ICON_FA_LIST))
+PANEL_MIN = {"inputs": (220, 120), "effects": (240, 140), "preview": (200, 120), "playlist": (300, 150)}
+SNAP = 14       # how close (px) an edge has to come to another edge to snap onto it
+PANEL_EDGE = 6  # the grab band along each panel edge, for resizing
+PANEL_HEAD = 26
+
+
+def default_rects(W, H):
+    """The Custom layout's starting arrangement (like Classic): Inputs over Effects on the left, the preview beside
+    them, the playlist along the bottom. Pixel rects [x, y, w, h] in the area under the top bar."""
+    g = GAP
+    sw = round(min(max(S.sidebar_w, sc(280)), W * .45))
+    ph = round(min(max(S.playlist_h, sc(230)), H * .5))
+    top = H - ph - g
+    ih = round(top * .42)
+    return {"inputs": [0, 0, sw, ih], "effects": [0, ih + g, sw, top - ih - g],
+            "preview": [sw + g, 0, W - sw - g, top], "playlist": [0, top + g, W, ph]}
+
+
+def panel_rects(W, H):
+    """The saved arrangement (kept as fractions of the area, so it follows the window's size), in pixels."""
+    rects = default_rects(W, H)
+    for key, r in (S.panels or {}).items():
+        if key in rects and isinstance(r, (list, tuple)) and len(r) == 4:
+            try:
+                x, y, w, h = (float(v) for v in r)
+            except (TypeError, ValueError):
+                continue
+            rects[key] = [round(x * W), round(y * H), round(w * W), round(h * H)]
+    for key, r in rects.items():   # always on screen and never smaller than its minimum
+        mw, mh = (min(sc(v), lim) for v, lim in zip(PANEL_MIN[key], (W, H)))
+        r[2], r[3] = max(mw, min(r[2], W)), max(mh, min(r[3], H))
+        r[0], r[1] = max(0, min(r[0], W - r[2])), max(0, min(r[1], H - r[3]))
+    return rects
+
+
+def store_rects(rects, W, H):
+    S.panels = {k: [r[0] / W, r[1] / H, r[2] / W, r[3] / H] for k, r in rects.items()}
+    save_layout()
+
+
+def panel_min(key, axis):
+    return sc(PANEL_MIN[key][axis])
+
+
+def near(r, o, axis, reach):
+    """Do r and o overlap along `axis`, or come within `reach` of it?"""
+    return r[axis] - reach <= o[axis] + o[axis + 2] and o[axis] - reach <= r[axis] + r[axis + 2]
+
+
+def snap_targets(rects, skip, r, axis, size):
+    """Where an edge along `axis` may snap: the area's own edges, and each nearby panel's edges - flush against it
+    (with the usual gap) or lined up with it. (position, kind, whether that panel is beside this one)"""
+    out = [(0.0, "edge", False), (float(size), "edge", False)]
+    other = 1 - axis
+    for k, o in rects.items():
+        if k in skip:
+            continue
+        lo, hi = o[axis], o[axis] + o[axis + 2]
+        touching = near(r, o, other, sc(SNAP))
+        if touching:                      # side by side: flush against it
+            out += [(hi + GAP, "after", True), (lo - GAP, "before", True)]
+        if near(r, o, other, sc(80)):     # close by: line up with its edges
+            out += [(lo, "align_lo", touching), (hi, "align_hi", touching)]
+    return out
+
+
+def best_snap(edges, targets, reach):
+    """edges: (position, which end: 0 low / 1 high). The closest edge-to-target match within reach:
+    (shift, target position) or None. A low edge doesn't take 'before' spots and a high edge doesn't take 'after'
+    ones, and beside a panel an edge doesn't line up with that panel's far edge, so panels never snap on top of each
+    other."""
+    best = None
+    for e, end in edges:
+        for t, kind, touching in targets:
+            if (kind == "before" and end == 0) or (kind == "after" and end == 1):
+                continue
+            if touching and ((kind == "align_hi" and end == 0) or (kind == "align_lo" and end == 1)):
+                continue
+            d = t - e
+            if abs(d) <= reach and (best is None or abs(d) < abs(best[0])):
+                best = (d, t)
+    return best
+
+
+def seam_members(rects, key, axis, side, solo):
+    """An edge being dragged, and every edge that touches it in one line (panels flush against it, and panels
+    lined up with it that touch those), so a seam between panels moves as one. (panel, side) pairs."""
+    r = rects[key]
+    s = r[axis] + (r[axis + 2] if side else 0)
+    members = [(key, side)]
+    if solo:
+        return members
+    tol = 3
+    other = 1 - axis
+    changed = True
+    while changed:
+        changed = False
+        for k, o in rects.items():
+            for sd in (0, 1):
+                if (k, sd) in members:
+                    continue
+                e = o[axis] + (o[axis + 2] if sd else 0)
+                want = s if sd == side else (s + GAP if side else s - GAP)
+                if abs(e - want) > tol:
+                    continue
+                if any(near(rects[m], o, other, GAP + tol) for m, _ in members):
+                    members.append((k, sd))
+                    changed = True
+    return members
+
+
+def panel_drag_update(rects, W, H):
+    """Apply the move or resize in progress (S.pdrag) to rects, snapping edges. Returns guide lines to draw:
+    (axis, position, from, to)."""
+    d = S.pdrag
+    io = imgui.get_io()
+    delta = (io.mouse_pos.x - d["m0"][0], io.mouse_pos.y - d["m0"][1])
+    size = (W, H)
+    guides = []
+    base = d["r0"]
+    for k in rects:
+        rects[k] = list(base[k])
+    key = d["key"]
+    r = rects[key]
+    if d["sides"] is None:   # moving: both axes, either edge may snap
+        for axis in (0, 1):
+            r[axis] = base[key][axis] + delta[axis]
+            r[axis] = max(0, min(r[axis], size[axis] - r[axis + 2]))
+            if not io.key_shift:   # Shift: no snapping
+                tg = snap_targets(rects, {key}, r, axis, size[axis])
+                hit = best_snap(((r[axis], 0), (r[axis] + r[axis + 2], 1)), tg, sc(SNAP))
+                if hit:
+                    r[axis] += hit[0]
+                    guides.append((axis, hit[1]))
+            r[axis] = max(0, min(r[axis], size[axis] - r[axis + 2]))
+    else:                    # resizing: the dragged edge(s), and the seam they're part of
+        for axis, side in d["sides"].items():
+            members = d["seams"][axis]
+            s0 = base[key][axis] + (base[key][axis + 2] if side else 0)
+            s = s0 + delta[axis]
+            if not io.key_shift:
+                tg = snap_targets(rects, {m for m, _ in members}, r, axis, size[axis])
+                hit = best_snap(((s, side),), tg, sc(SNAP))
+                if hit:
+                    s += hit[0]
+                    guides.append((axis, hit[1]))
+            lo_lim, hi_lim = -1e9, 1e9   # keep every member inside the area and at least its minimum size
+            for m, sd in members:
+                b = base[m]
+                off = 0 if sd == side else (GAP if side else -GAP)
+                if sd:   # its high edge sits at s + off
+                    lo_lim = max(lo_lim, b[axis] + panel_min(m, axis) - off)
+                    hi_lim = min(hi_lim, size[axis] - off)
+                else:    # its low edge sits at s + off
+                    hi_lim = min(hi_lim, b[axis] + b[axis + 2] - panel_min(m, axis) - off)
+                    lo_lim = max(lo_lim, -off)
+            s = max(lo_lim, min(s, hi_lim)) if lo_lim <= hi_lim else s0
+            for m, sd in members:
+                b, rm = base[m], rects[m]
+                e = s + (0 if sd == side else (GAP if side else -GAP))
+                if sd:
+                    rm[axis + 2] = e - b[axis]
+                else:
+                    rm[axis], rm[axis + 2] = e, b[axis] + b[axis + 2] - e
+    out = []
+    for axis, pos in guides:   # a line along the snapped edge, across the panels it lines up with
+        span = [rects[key][1 - axis], rects[key][1 - axis] + rects[key][3 - axis]]
+        for o in rects.values():
+            if abs(o[axis] - pos) < 2 or abs(o[axis] + o[axis + 2] - pos) < 2 \
+                    or abs(o[axis] - GAP - pos) < 2 or abs(o[axis] + o[axis + 2] + GAP - pos) < 2:
+                span = [min(span[0], o[1 - axis]), max(span[1], o[1 - axis] + o[3 - axis])]
+        out.append((axis, pos, span[0], span[1]))
+    return out
+
+
+def shut_rects(full, H):
+    """The panels as shown: a folded panel is just its title strip (at the bottom of its spot when it sits on the
+    window's bottom edge, else at the top), and the panels flush against the freed side grow into the room."""
+    rects = {k: list(r) for k, r in full.items()}
+    hh = sc(PANEL_HEAD) + 2
+    for key in S.panels_shut:
+        if key not in rects:
+            continue
+        r = full[key]
+        down = r[1] + r[3] >= H - 3
+        if down:
+            rects[key] = [r[0], r[1] + r[3] - hh, r[2], hh]
+        else:
+            rects[key] = [r[0], r[1], r[2], hh]
+        for k, o in full.items():   # neighbours flush against the freed side, and no wider than it, take the room
+            if k == key or k in S.panels_shut or o[0] < r[0] - 3 or o[0] + o[2] > r[0] + r[2] + 3:
+                continue
+            if not down and abs(o[1] - (r[1] + r[3] + GAP)) <= 3:
+                bottom = rects[k][1] + rects[k][3]
+                rects[k][1] = r[1] + hh + GAP
+                rects[k][3] = bottom - rects[k][1]
+            elif down and abs(o[1] + o[3] + GAP - r[1]) <= 3:
+                rects[k][3] = r[1] + r[3] - hh - GAP - rects[k][1]
+    return rects
+
+
+def toggle_shut(key):
+    if key in S.panels_shut:
+        S.panels_shut = [k for k in S.panels_shut if k != key]
+    else:
+        S.panels_shut = S.panels_shut + [key]
+    save_layout()
+
+
+def panel_frame(key, title, icon, r, ox, oy, rects):
+    """A panel's border, its title strip (drag it to move the panel; the arrow or a double-click folds it) and the
+    grab bands along its edges (drag to resize). Starts S.pdrag when one is pressed."""
+    x0, y0, x1, y1 = ox + r[0], oy + r[1], ox + r[0] + r[2], oy + r[1] + r[3]
+    dl = imgui.get_window_draw_list()
+    hh, e = sc(PANEL_HEAD), PANEL_EDGE
+    busy = S.pdrag is not None and S.pdrag["key"] == key
+    shut = key in S.panels_shut
+    # title strip
+    dl.add_rect_filled_multi_color(V(x0 + 1, y0 + 1), V(x1 - 1, y0 + hh), u32(TOPBAR_TOP), u32(TOPBAR_TOP),
+                                   u32(PANEL), u32(PANEL))
+    dl.add_line(V(x0 + 1, y0 + hh), V(x1 - 1, y0 + hh), u32(EDGE_LO), 1)
+    dl.add_line(V(x0 + 1, y0 + hh + 1), V(x1 - 1, y0 + hh + 1), u32(BORDER), 1)
+    imgui.push_font(S.bold, 12.5)
+    th = imgui.get_text_line_height()
+    arrow = fa.ICON_FA_CHEVRON_RIGHT if shut else fa.ICON_FA_CHEVRON_DOWN
+    ax = x0 + sc(10)
+    imgui.set_cursor_screen_pos(V(ax - 4, y0 + 3))
+    imgui.invisible_button("##fold", V(sc(20), hh - 4))
+    hot = imgui.is_item_hovered()
+    if imgui.is_item_clicked(0):
+        toggle_shut(key)
+    if hot:
+        imgui.set_tooltip(f"Show the {title} panel" if shut else f"Fold the {title} panel down to its title")
+    imgui.push_font(S.bold, 10)
+    aw = imgui.calc_text_size(arrow)
+    dl.add_text(V(ax + (sc(12) - aw.x) / 2, y0 + (hh - aw.y) / 2 + 1), u32(TEXT if hot else DIM), arrow)
+    imgui.pop_font()
+    dl.add_text(V(x0 + sc(30), y0 + (hh - th) / 2 + 1), u32(TEXT if busy else DIM), f"{icon}   {title.upper()}")
+    imgui.pop_font()
+    for i in range(3):   # grip dots on the right: this is the handle
+        dl.add_circle_filled(V(x1 - sc(16) - i * 6, y0 + hh / 2), 1.6, u32(alpha(DIM, .7)))
+    # border: a lit outline while it's being moved or resized
+    dl.add_rect(V(x0, y0), V(x1, y1), u32(CYAN if busy else BORDER), 4, thickness=2 if busy else 1)
+    dl.add_line(V(x0 + 4, y0 + 1), V(x1 - 4, y0 + 1), u32(EDGE_HI), 1)
+
+    def grab(uid, a, b, cursor, sides):
+        imgui.set_cursor_screen_pos(a)
+        imgui.invisible_button(f"##{uid}", V(max(1, b.x - a.x), max(1, b.y - a.y)))
+        if imgui.is_item_hovered() or imgui.is_item_active():
+            imgui.set_mouse_cursor(cursor)
+        if imgui.is_item_activated():
+            io = imgui.get_io()
+            seams = {axis: seam_members(rects, key, axis, side, io.key_alt) for axis, side in (sides or {}).items()}
+            S.pdrag = dict(key=key, sides=sides, seams=seams, m0=(io.mouse_pos.x, io.mouse_pos.y),
+                           r0={k: list(v) for k, v in rects.items()})
+    c = e * 2
+    MC = imgui.MouseCursor_
+    # corners first (the first item under the mouse wins), then edges, then the title strip
+    if shut:   # folded: it can still move and be made wider, not taller
+        grab("w", V(x0, y0), V(x0 + e, y1), MC.resize_ew, {0: 0})
+        grab("e", V(x1 - e, y0), V(x1, y1), MC.resize_ew, {0: 1})
+    else:
+        grab("nw", V(x0, y0), V(x0 + c, y0 + c), MC.resize_nwse, {0: 0, 1: 0})
+        grab("ne", V(x1 - c, y0), V(x1, y0 + c), MC.resize_nesw, {0: 1, 1: 0})
+        grab("sw", V(x0, y1 - c), V(x0 + c, y1), MC.resize_nesw, {0: 0, 1: 1})
+        grab("se", V(x1 - c, y1 - c), V(x1, y1), MC.resize_nwse, {0: 1, 1: 1})
+        grab("n", V(x0 + c, y0), V(x1 - c, y0 + e - 2), MC.resize_ns, {1: 0})
+        grab("s", V(x0 + c, y1 - e), V(x1 - c, y1), MC.resize_ns, {1: 1})
+        grab("w", V(x0, y0 + c), V(x0 + e, y1 - c), MC.resize_ew, {0: 0})
+        grab("e", V(x1 - e, y0 + c), V(x1, y1 - c), MC.resize_ew, {0: 1})
+    grab("move", V(x0 + e, y0 + e - 2), V(x1 - e, y0 + hh), MC.hand, None)
+    if imgui.is_item_hovered() and imgui.is_mouse_double_clicked(0):
+        S.pdrag = None
+        toggle_shut(key)
+    if imgui.is_item_hovered(imgui.HoveredFlags_.delay_normal) and not S.pdrag:
+        imgui.set_tooltip("Drag to move: edges snap to other panels and the window (Shift: no snapping)" + chr(10) +
+                          "Drag a panel's edge to resize it; panels joined to that edge follow (Alt: just this one)"
+                          + chr(10) + "Double-click (or the arrow) to fold it down to its title")
+    return V(x0 + e, y0 + hh + 2), V(x1 - e, y1 - e)
+
+
+def panel_body(app, key):
+    if key == "inputs":
+        settings_cards("inputs", [("Input", fa.ICON_FA_VIDEO, lambda: input_section(app)),
+                                  ("Audio", fa.ICON_FA_MUSIC, lambda: audio_section(app))])
+    elif key == "effects":
+        effects_section(app)
+    elif key == "preview":
+        preview(app)
+    else:
+        flow_start()
+        transport_buttons(app, flow)
+        auto_controls(app, flow)
+        tempo_strip(app, flow)
+        look_file_buttons(app, flow)
+        imgui.spacing()
+        tiles(app, 0)
+
+
+def flow_start():
+    S.flow_first = True
+
+
+def flow(w, gap=-1):
+    """Custom layout: put the next item (w wide) beside the last one if it fits, else on a new line."""
+    if S.flow_first:
+        S.flow_first = False
+        return
+    imgui.same_line(0, gap)
+    if imgui.get_content_region_avail().x < w:
+        imgui.new_line()
+
+
+def custom_layout(app, W, H, tb):
+    """Every section is a panel you can move (by its title strip) and resize (by its edges) anywhere under the top
+    bar. Edges snap onto the other panels' edges - flush beside them or lined up with them - and onto the window's.
+    The arrangement is kept in ui_settings.json."""
+    imgui.end()   # the main window: the panels are windows of their own, over it
+    vp = imgui.get_main_viewport()
+    ox, oy, ah = vp.pos.x, vp.pos.y + tb, H - tb
+    full = panel_rects(W, ah)
+    rects = shut_rects(full, ah)
+    shown = {k: list(r) for k, r in rects.items()}
+    guides = []
+    if S.pdrag:
+        guides = panel_drag_update(rects, W, ah)
+        if not imgui.is_mouse_down(0):   # let go: keep the new arrangement (a folded panel keeps its full size)
+            S.pdrag = None
+            for k, r in full.items():
+                for i in range(4):
+                    r[i] += rects[k][i] - shown[k][i]
+            store_rects(full, W, ah)
+            guides = []
+    flags = (imgui.WindowFlags_.no_title_bar | imgui.WindowFlags_.no_move | imgui.WindowFlags_.no_resize
+             | imgui.WindowFlags_.no_collapse | imgui.WindowFlags_.no_saved_settings
+             | imgui.WindowFlags_.no_scrollbar | imgui.WindowFlags_.no_scroll_with_mouse)
+    for key, title, icon in PANELS:
+        r = rects[key]
+        imgui.set_next_window_pos(V(ox + r[0], oy + r[1]))
+        imgui.set_next_window_size(V(r[2], r[3]))
+        imgui.push_style_color(imgui.Col_.window_bg, PANEL)
+        imgui.push_style_var(imgui.StyleVar_.window_padding, V(0, 0))
+        imgui.push_style_var(imgui.StyleVar_.window_rounding, 4)
+        imgui.begin(f"##panel_{key}", None, flags)
+        imgui.pop_style_var(2)
+        imgui.pop_style_color()
+        a, b = panel_frame(key, title, icon, r, ox, oy, rects)
+        if key in S.panels_shut:
+            imgui.end()
+            continue
+        imgui.set_cursor_screen_pos(a)
+        pad = V(0, 0) if key == "preview" else V(12, 8) if key == "playlist" else V(12, 10)
+        imgui.push_style_var(imgui.StyleVar_.window_padding, pad)
+        if key == "preview":
+            imgui.push_style_color(imgui.Col_.child_bg, BG)
+        body_flags = (imgui.WindowFlags_.no_scrollbar | imgui.WindowFlags_.no_scroll_with_mouse
+                      if key in ("preview", "playlist") else 0)
+        imgui.begin_child("body", V(max(1, b.x - a.x), max(1, b.y - a.y)),
+                          imgui.ChildFlags_.always_use_window_padding, body_flags)
+        if key == "preview":
+            imgui.pop_style_color()
+        imgui.pop_style_var()
+        imgui.push_id(key)
+        panel_body(app, key)
+        imgui.pop_id()
+        imgui.end_child()
+        imgui.end()
+
+    fg = imgui.get_foreground_draw_list()
+    for axis, pos, lo, hi in guides:   # what a moving edge has locked onto
+        if axis == 0:
+            fg.add_line(V(ox + pos, oy + lo - 8), V(ox + pos, oy + hi + 8), u32(alpha(CYAN, .8)), 2)
+        else:
+            fg.add_line(V(ox + lo - 8, oy + pos), V(ox + hi + 8, oy + pos), u32(alpha(CYAN, .8)), 2)
+
+    # opened here, beside the panels, so Ctrl+S always works
+    if S.open_save:
+        S.open_save = False
+        S.save_name = f"Look {len(app.playlist) + 1}"
+        imgui.open_popup("save_look")
+    save_popup(app)
+
+
+def settings_window(app, W, H, tb):
+    """Settings drops down under its top-bar button (or opens from File). It folds away again with the button, Esc,
+    or a click anywhere outside it (not while a menu inside it is open, or during MIDI learn)."""
+    if not S.settings_open:
+        return
+    vp = imgui.get_main_viewport()
+    w = min(sc(480), W - 16)
+    if S.settings_btn:
+        bmin, bmax = S.settings_btn
+        x, y = max(vp.pos.x + 8, min(bmin.x, vp.pos.x + W - w - 8)), bmax.y + 6
+    else:
+        x, y = vp.pos.x + 8, vp.pos.y + tb
+    h = min(sc(760), vp.pos.y + H - y - 8)
+    imgui.set_next_window_pos(V(x, y))
+    imgui.set_next_window_size(V(w, max(sc(160), h)))
+    if S.settings_focus:
+        imgui.set_next_window_focus()
+        S.settings_focus = False
+    imgui.push_style_color(imgui.Col_.window_bg, PANEL)
+    imgui.push_style_color(imgui.Col_.border, BORDER)
+    imgui.push_style_var(imgui.StyleVar_.window_border_size, 1)
+    imgui.push_style_var(imgui.StyleVar_.window_rounding, 4)
+    imgui.push_style_var(imgui.StyleVar_.window_padding, V(12, 10))
+    imgui.begin("##settings_drop", None, imgui.WindowFlags_.no_title_bar | imgui.WindowFlags_.no_move
+                | imgui.WindowFlags_.no_resize | imgui.WindowFlags_.no_collapse | imgui.WindowFlags_.no_saved_settings)
+    imgui.pop_style_var(3)
+    imgui.pop_style_color(2)
+    pos = imgui.get_window_pos()
+    # a little notch pointing up at the button
+    if S.settings_btn:
+        cx = (S.settings_btn[0].x + S.settings_btn[1].x) / 2
+        if pos.x + 12 < cx < pos.x + w - 12:
+            fg = imgui.get_foreground_draw_list()
+            fg.add_triangle_filled(V(cx - 7, pos.y + 1), V(cx + 7, pos.y + 1), V(cx, pos.y - 6), u32(PANEL))
+            fg.add_line(V(cx - 7, pos.y), V(cx, pos.y - 6), u32(BORDER), 1)
+            fg.add_line(V(cx, pos.y - 6), V(cx + 7, pos.y), u32(BORDER), 1)
+    settings_cards("settings", settings_list(app))
+    io = imgui.get_io()
+    mine = imgui.is_window_hovered(imgui.HoveredFlags_.root_and_child_windows
+                                   | imgui.HoveredFlags_.allow_when_blocked_by_popup
+                                   | imgui.HoveredFlags_.allow_when_blocked_by_active_item)
     imgui.end()
-
-    restore_prompt(app)
-    welcome(app)
-    delete_prompt(app)
-    keys_sheet()
-
-    if S.pending_move:   # applied after drawing so lists don't change mid-loop
-        uid, dest, index = S.pending_move
-        S.pending_move = None
-        if (item := app.pipe.find(uid)) is not None and item is not (dest[index] if index is not None
-                                                                       and index < len(dest) else None):
-            app.pipe.move_item(item, dest, index)
+    on_btn = S.settings_btn and imgui.is_mouse_hovering_rect(*S.settings_btn)
+    if imgui.is_popup_open("", imgui.PopupFlags_.any_popup) or app.midi_learn:
+        return
+    if (imgui.is_mouse_clicked(0) and not mine and not on_btn) or (imgui.is_key_pressed(imgui.Key.escape, False) and not io.want_text_input):
+        S.settings_open = False
 
 
 WELCOME_TIPS = [
     (fa.ICON_FA_PLAY, "Fire a look", "Click a tile in the playlist at the bottom. The sample looks are there to try."),
-    (fa.ICON_FA_LAYER_GROUP, "Make your own", "Effects tab: + Add effect, tweak the cards, then Save look."),
+    (fa.ICON_FA_LAYER_GROUP, "Make your own", "Effects: + Add effect, tweak the cards, then Save look."),
     (fa.ICON_FA_SLIDERS, "Play it with hardware", "MIDI learn (top bar): click a control, then move a knob or hit a pad."),
     (fa.ICON_FA_SHARE_NODES, "Send it to OBS", "Spout (top bar) with the Spout2 plugin, or Window Capture of "
                                                  "'Lumoria Output'."),
-    (fa.ICON_FA_ROTATE_LEFT, "Experiment freely", "Ctrl+Z undoes any change. Themes, AI mask and MIDI are in the "
-                                                   "Settings tab."),
+    (fa.ICON_FA_ROTATE_LEFT, "Experiment freely", "Ctrl+Z undoes any change. Themes, AI mask and MIDI are in "
+                                                   "Settings, at the top left."),
 ]
 
 
@@ -983,67 +1449,6 @@ def toggle_play(app):
 
 # ---------------------------------------------------------------- top bar
 
-def theme_menu():
-    """The palette button's popup: the themes, each with an LED in its light colour, and the Lights choice."""
-    if S.theme_anchor is not None:
-        imgui.set_next_window_pos(V(S.theme_anchor.x, S.theme_anchor.y + 4), imgui.Cond_.appearing, V(1, 0))
-    if not imgui.begin_popup("##themes"):
-        return
-    imgui.push_font(S.bold, 12.5)
-    imgui.text_colored(DIM, "THEME")
-    imgui.pop_font()
-    dl = imgui.get_window_draw_list()
-    for name in THEMES:
-        p = imgui.get_cursor_screen_pos()
-        if imgui.selectable(f"      {name}##pick{name}", name == S.theme, 0, V(sc(150), 0))[0]:
-            apply_theme(name, S.accent)
-            save_layout()
-        led(dl, V(p.x + sc(8), p.y + imgui.get_text_line_height() / 2), rgb(THEMES[name]["CYAN"]), True, 2.8)
-    imgui.separator()
-    imgui.push_font(S.bold, 12.5)
-    imgui.text_colored(DIM, "LIGHTS")
-    imgui.pop_font()
-    for i, (name, col) in enumerate(ACCENTS):
-        p = imgui.get_cursor_screen_pos()
-        if imgui.selectable(f"      {name}##light{i}", i == S.accent, 0, V(sc(150), 0))[0]:
-            apply_theme(S.theme, i)
-            save_layout()
-        led(dl, V(p.x + sc(8), p.y + imgui.get_text_line_height() / 2),
-            rgb(col or THEMES[S.theme]["CYAN"]), True, 2.8)
-    imgui.end_popup()
-
-
-def theme_chips(right_edge):
-    """A strip of theme keys after the readout, each with an LED in its theme's light colour. Left out when
-    the window is too narrow (Settings > Interface has the same choice)."""
-    names = list(THEMES)
-    pad = imgui.get_style().frame_padding.x
-    imgui.push_font(S.bold, 12.5)
-    ws = [imgui.calc_text_size(n).x + pad * 2 + sc(16) for n in names]
-    imgui.pop_font()
-    start = S.lcd_end + sc(18)
-    total = sum(ws) + 4 + 2 * (len(ws) - 1)
-    if start + total > right_edge - sc(18):
-        return
-    y = imgui.get_window_pos().y + sc(12)
-    h = imgui.get_frame_height()
-    dl = imgui.get_window_draw_list()
-    dl.add_rect_filled(V(start, y), V(start + total, y + h), u32(FRAME), 3)
-    dl.add_rect(V(start, y), V(start + total, y + h), u32(BORDER), 3)
-    cx = start + 2
-    imgui.push_font(S.bold, 12.5)
-    for name, w in zip(names, ws):
-        imgui.set_cursor_screen_pos(V(cx, y + 2))
-        if neon_button(f"      {name}##theme{name}", CYAN, V(w, h - 4), name == S.theme, f"{name} theme",
-                       flat=True):
-            apply_theme(name, S.accent)
-            save_layout()
-        mn = imgui.get_item_rect_min()
-        led(dl, V(mn.x + sc(10), mn.y + (h - 4) / 2), rgb(THEMES[name]["CYAN"]), True, 2.6)
-        cx += w + 2
-    imgui.pop_font()
-
-
 LOGO_SETS = [("lumoria_symbol", "lumoria_symbol", "lumoria_wordmark"),
              ("lumoria_symbol_neon", "lumoria_symbol_neon_glow", "lumoria_wordmark_neon"),
              ("lumoria_symbol_neon", "lumoria_symbol_neon_glow", "lumoria_wordmark_neon_gradient")]
@@ -1110,16 +1515,43 @@ def top_bar(app):
         imgui.text_colored(DIM, "VISUAL FX ENGINE")
         imgui.pop_font()
 
-    # status readout: a recessed LCD window
-    imgui.same_line(0, 28)
+    imgui.same_line(0, 22)
+    imgui.set_cursor_pos_y(sc(12))
+    file_menu(app)
+    imgui.same_line(0, 6)
+    imgui.set_cursor_pos_y(sc(12))
+    if neon_button(f"{fa.ICON_FA_GEAR}  Settings##settingsbtn", DIM, V(0, 0), S.settings_open,
+                   None if S.settings_open else
+                   "AI mask, tempo, transitions, output, MIDI, interface (theme, lights, layout)", flat=True):
+        S.settings_open = S.settings_focus = not S.settings_open
+    S.settings_btn = (imgui.get_item_rect_min(), imgui.get_item_rect_max())
+    left_end = imgui.get_item_rect_max().x - imgui.get_window_pos().x
+
+    # right-hand status toggles (measured first: the readout is centred in the room between)
+    items = top_bar_items(app)
+    pad = imgui.get_style().frame_padding.x
+    widths = [imgui.calc_text_size(t).x + pad * 2 for t, *_ in items]
+    right_x = imgui.get_window_width() - 16 - sum(widths) - 8 * (len(items) - 1)
+
+    # status readout: a recessed LCD window, centred on the window (or in the free room, when that's tighter)
     src_icon = fa.ICON_FA_VIDEO if isinstance(app.source, CameraSource) else (
         fa.ICON_FA_BARCODE if app.source is None else fa.ICON_FA_FILM)
     w, h = app.pipe.size
     readout = f"{w}x{h}  {app.fps:>3} FPS"
     label_ = app.source_label if len(app.source_label) <= 34 else app.source_label[:33] + "..."
+    if S.load is None:
+        S.load = sysload.SysLoad()
+    ld = S.load
+    loads = [(n, v) for n, v in (("CPU", ld.cpu), ("GPU", ld.gpu)) if v is not None]
+    load_text = "  ".join(f"{n} {v:>3.0f}%" for n, v in loads)
     imgui.push_font(S.mono, 16)
     rw = imgui.calc_text_size(f"{src_icon}  {label_}").x + imgui.calc_text_size(readout).x + 46
+    lw_load = imgui.calc_text_size(load_text).x if loads else 0
     imgui.pop_font()
+    if loads:
+        rw += lw_load + 18
+    rx = max(left_end + 14, min(right_x - 14 - rw, (imgui.get_window_width() - rw) / 2))
+    imgui.same_line(rx)
     p = imgui.get_cursor_screen_pos()
     top, bot = p.y + sc(9) - 2, p.y + sc(36) + 2
     dl = imgui.get_window_draw_list()
@@ -1134,42 +1566,21 @@ def top_bar(app):
     lw = imgui.calc_text_size(label_).x
     imgui.pop_font()
     dl.add_text(S.mono, 16 * S.scale, V(p.x + 34 + lw + 18, ty), u32(alpha(lcd, .7)), readout)
-    imgui.dummy(V(rw, 1))
-    S.lcd_end = p.x + rw
+    if loads:   # CPU / GPU load: amber when the computer is nearly flat out
+        imgui.push_font(S.mono, 16)
+        x = p.x + 34 + lw + 18 + imgui.calc_text_size(readout).x + 18
+        for n, v in loads:
+            part = f"{n} {v:>3.0f}%"
+            dl.add_text(S.mono, 16 * S.scale, V(x, ty), u32(AMBER if v >= 85 else alpha(lcd, .7)), part)
+            x += imgui.calc_text_size(part + "  ").x
+        imgui.pop_font()
+    imgui.dummy(V(rw, sc(36)))
+    if imgui.is_item_hovered() and loads:
+        own = lambda v: "" if v is None else f"  (Lumoria {v:.0f}%)"
+        imgui.set_tooltip("\n".join(f"{n}: {v:.0f}% of the whole computer{own(ld.own_cpu if n == 'CPU' else ld.own_gpu)}"
+                                    for n, v in loads) + "\nThe same figures as Task Manager, once a second")
 
-    # right-hand status toggles
-    items = [
-        (f"{fa.ICON_FA_TABLE_COLUMNS}  Flip", app.flip_preview, CYAN, "flip",
-         "Flip preview [M]: selfie view for you only, never broadcast"),
-        (f"{fa.ICON_FA_DISPLAY}  Output", app.out_win.visible, CYAN, "out",
-         "Show/hide the Lumoria Output window [O] (capture it in OBS)"),
-        (f"{fa.ICON_FA_SHARE_NODES}  Spout", app.spout is not None, CYAN, "spout",
-         "Share the output over Spout as 'Lumoria': full quality, straight from the GPU.\n"
-         "OBS: install the Spout2 plugin, then add a 'Spout2 Capture' source.\n"
-         "Also works with Resolume, TouchDesigner, MadMapper and other Spout apps."),
-        (f"{fa.ICON_FA_EXPAND}", False, CYAN, "fs", "Output fullscreen [F11]"),
-        (f"{fa.ICON_FA_CAMERA}  {'LIVE' if app.vcam else 'Virtual cam'}", app.vcam is not None, MAGENTA, "vcam",
-         "Send to the OBS Virtual Camera (Discord, Zoom, browsers)"),
-    ]
-    if S.theme_keys == 0:
-        items.append((f"{fa.ICON_FA_PALETTE}", False, CYAN, "theme", f"Theme and lights ({S.theme})"))
-    rec = app.recorder
-    secs = rec.seconds() if rec.recording else 0
-    items.insert(0, (f"{fa.ICON_FA_CIRCLE}  " + (f"{int(secs // 60)}:{int(secs % 60):02d}" if rec.recording else "Rec"),
-                     rec.recording, RED, "rec", "Record the output to a video file [R]\n"
-                                                "Folder, format and frame rate: Settings > Output"))
-    items.insert(0, (f"{fa.ICON_FA_SLIDERS}  MIDI learn", app.midi_learn, AMBER, "midi",
-                     "Link knobs, faders and pads: turn this on, click a control, then move a knob\n"
-                     "or hit a pad. Click again to finish. Links are listed in Settings > MIDI."))
-    if app.update_ready:
-        items.insert(0, (f"{fa.ICON_FA_ROTATE}  Update ready - restart", True, MAGENTA, "upd",
-                         "Lumoria's code changed since it started. Click to relaunch with the new version\n"
-                         "(your current effects aren't kept - save a look first if you want them)."))
-    pad = imgui.get_style().frame_padding.x
-    widths = [imgui.calc_text_size(t).x + pad * 2 for t, *_ in items]
-    x = imgui.get_window_width() - 16 - sum(widths) - 8 * (len(items) - 1)
-    if S.theme_keys == 1:
-        theme_chips(imgui.get_window_pos().x + x)
+    x = right_x
     for i, (text, active, col, key, tip) in enumerate(items):
         imgui.same_line(x)
         imgui.set_cursor_pos_y(sc(12))
@@ -1187,9 +1598,6 @@ def top_bar(app):
                 app.toggle_spout()
             elif key == "rec":
                 app.toggle_record()
-            elif key == "theme":
-                imgui.open_popup("##themes")
-                S.theme_anchor = imgui.get_item_rect_max()   # the popup hangs below the button, right-aligned
             elif key == "midi":
                 app.midi_learn, app.learn_target = not app.midi_learn, None
             else:
@@ -1198,34 +1606,96 @@ def top_bar(app):
             mn, mx = imgui.get_item_rect_min(), imgui.get_item_rect_max()
             led(imgui.get_window_draw_list(), V(mx.x - 7, mn.y + 7), CYAN, glfw.get_time() - app.midi_seen < .12, 2.4)
         x += widths[i] + 8
-    theme_menu()
+
+
+def top_bar_items(app):
+    """The top bar's right-hand toggles: (label, lit, colour, key, tooltip)."""
+    items = [
+        (f"{fa.ICON_FA_TABLE_COLUMNS}  Flip", app.flip_preview, CYAN, "flip",
+         "Flip preview [M]: selfie view for you only, never broadcast"),
+        (f"{fa.ICON_FA_DISPLAY}  Output", app.out_win.visible, CYAN, "out",
+         "Show/hide the Lumoria Output window [O] (capture it in OBS)"),
+        (f"{fa.ICON_FA_SHARE_NODES}  Spout", app.spout is not None, CYAN, "spout",
+         "Share the output over Spout as 'Lumoria': full quality, straight from the GPU.\n"
+         "OBS: install the Spout2 plugin, then add a 'Spout2 Capture' source.\n"
+         "Also works with Resolume, TouchDesigner, MadMapper and other Spout apps."),
+        (f"{fa.ICON_FA_EXPAND}", False, CYAN, "fs", "Output fullscreen [F11]"),
+        (f"{fa.ICON_FA_CAMERA}  {'LIVE' if app.vcam else 'Virtual cam'}", app.vcam is not None, MAGENTA, "vcam",
+         "Send to the OBS Virtual Camera (Discord, Zoom, browsers)"),
+    ]
+    rec = app.recorder
+    secs = rec.seconds() if rec.recording else 0
+    items.insert(0, (f"{fa.ICON_FA_CIRCLE}  " + (f"{int(secs // 60)}:{int(secs % 60):02d}" if rec.recording else "Rec"),
+                     rec.recording, RED, "rec", "Record the output to a video file [R]\n"
+                                                "Folder, format and frame rate: Settings > Output"))
+    items.insert(0, (f"{fa.ICON_FA_SLIDERS}  MIDI learn", app.midi_learn, AMBER, "midi",
+                     "Link knobs, faders and pads: turn this on, click a control, then move a knob\n"
+                     "or hit a pad. Click again to finish. Links are listed in Settings > MIDI."))
+    if app.update_ready:
+        items.insert(0, (f"{fa.ICON_FA_ROTATE}  Update ready - restart", True, MAGENTA, "upd",
+                         "Lumoria's code changed since it started. Click to relaunch with the new version\n"
+                         "(your current effects aren't kept - save a look first if you want them)."))
+    return items
+
+
+def file_menu(app):
+    """File: looks in and out of Lumoria, and the things people expect to find there."""
+    if neon_button(f"{fa.ICON_FA_FOLDER_OPEN}  File##filemenu", DIM, V(0, 0), flat=True):
+        imgui.open_popup("##file")
+        S.file_anchor = V(imgui.get_item_rect_min().x, imgui.get_item_rect_max().y + 4)
+    if S.file_anchor is not None:
+        imgui.set_next_window_pos(S.file_anchor, imgui.Cond_.appearing)
+    imgui.push_style_var(imgui.StyleVar_.item_spacing, V(10, 9))
+    if imgui.begin_popup("##file"):
+        item = lambda icon, text, keys="", ok=True: imgui.menu_item_simple(f"{icon}   {text}", keys, False, ok)
+        if item(fa.ICON_FA_FILE, "New (clear the effects)", "C"):
+            app.clear()
+        if item(fa.ICON_FA_FLOPPY_DISK, "Save look...", "Ctrl+S"):
+            S.open_save = True
+        imgui.separator()
+        if item(fa.ICON_FA_FILE_IMPORT, "Import looks / playlist...", "Ctrl+I"):
+            app.ask_import()
+        if item(fa.ICON_FA_FILE_EXPORT, "Export playlist...", "Ctrl+E", bool(app.playlist)):
+            app.ask_export()
+        if item(fa.ICON_FA_FILE_EXPORT, "Export this look...", "", app.current_preset in app.playlist):
+            app.ask_export([app.current_preset])
+        imgui.separator()
+        if item(fa.ICON_FA_FOLDER_OPEN, "Open recordings folder"):
+            os.makedirs(app.rec_folder, exist_ok=True)
+            os.startfile(app.rec_folder)
+        if item(fa.ICON_FA_GEAR, "Settings..."):
+            S.settings_open = S.settings_focus = True
+        if item(fa.ICON_FA_KEYBOARD, "Keyboard shortcuts", "F1"):
+            S.show_keys = True
+        imgui.separator()
+        if item(fa.ICON_FA_RIGHT_FROM_BRACKET, "Exit", "Alt+F4") and S.windows:
+            glfw.set_window_should_close(S.windows[0], True)
+        imgui.end_popup()
+    imgui.pop_style_var()
 
 
 # ---------------------------------------------------------------- sidebar
 
 def sidebar(app):
-    """Two tabs: Effects (what you play: inputs, audio, the chain) and Settings (set once: AI mask, transitions,
-    MIDI, output, interface, about)."""
+    """What you play: inputs, audio and the effect chain. (Settings - set once: AI mask, transitions, MIDI, output,
+    interface, about - opens from the top bar.)"""
     imgui.spacing()
-    tab = segmented("sidetab", (f"{fa.ICON_FA_LAYER_GROUP}   EFFECTS", f"{fa.ICON_FA_GEAR}   SETTINGS"), S.side_tab)
-    if tab != S.side_tab:
-        S.side_tab = tab
-        save_layout()
-    imgui.spacing()
-    if S.side_tab == 0:
-        settings_cards("top", [("Input", fa.ICON_FA_VIDEO, lambda: input_section(app)),
-                               ("Audio", fa.ICON_FA_MUSIC, lambda: audio_section(app))])
-        if section("Effects", fa.ICON_FA_LAYER_GROUP):
-            effects_section(app)
-    else:
-        settings_cards("settings", [("AI Mask", fa.ICON_FA_USER, lambda: mask_section(app)),
-                                    ("Tempo", fa.ICON_FA_DRUM, lambda: tempo_section(app)),
-                                    ("Transitions", fa.ICON_FA_WAND_MAGIC_SPARKLES, lambda: transitions_section(app)),
-                                    ("Output", fa.ICON_FA_TV, lambda: output_section(app)),
-                                    ("MIDI", fa.ICON_FA_SLIDERS, lambda: midi_section(app)),
-                                    ("Interface", fa.ICON_FA_PALETTE, interface_section),
-                                    ("About", fa.ICON_FA_CIRCLE_INFO, about_section)])
+    settings_cards("top", [("Input", fa.ICON_FA_VIDEO, lambda: input_section(app)),
+                           ("Audio", fa.ICON_FA_MUSIC, lambda: audio_section(app))])
+    if section("Effects", fa.ICON_FA_LAYER_GROUP):
+        effects_section(app)
     imgui.dummy(V(1, 12))
+
+
+def settings_list(app):
+    """The Settings tab's cards (the Settings panel in the Custom layout)."""
+    return [("AI Mask", fa.ICON_FA_USER, lambda: mask_section(app)),
+            ("Tempo", fa.ICON_FA_DRUM, lambda: tempo_section(app)),
+            ("Transitions", fa.ICON_FA_WAND_MAGIC_SPARKLES, lambda: transitions_section(app)),
+            ("Output", fa.ICON_FA_TV, lambda: output_section(app)),
+            ("MIDI", fa.ICON_FA_SLIDERS, lambda: midi_section(app)),
+            ("Interface", fa.ICON_FA_PALETTE, interface_section),
+            ("About", fa.ICON_FA_CIRCLE_INFO, about_section)]
 
 
 CREDITS = [   # what Lumoria is built with, and their licences (shown in Settings > About)
@@ -1355,6 +1825,16 @@ def midi_section(app):
 
 
 def interface_section():
+    label("Layout")
+    lay = segmented("layout", ("Classic", "Custom"), S.layout, CYAN)
+    if lay != S.layout:
+        S.layout, S.pdrag = lay, None
+        save_layout()
+    if imgui.is_item_hovered():
+        imgui.set_tooltip("Classic: the sidebar, preview and playlist in their fixed places" + chr(10) +
+                          "Custom: Inputs, Effects, Preview and Playlist are panels you place yourself - drag one by" + chr(10) +
+                          "its title strip and its edges snap to the other panels; drag an edge to resize." + chr(10) +
+                          "Your arrangement is kept between runs.")
     label("Theme")
     names = list(THEMES)
     i = names.index(S.theme) if S.theme in names else 0
@@ -1373,14 +1853,6 @@ def interface_section():
     if imgui.is_item_hovered():
         imgui.set_tooltip("The main light colour: lit keys, LEDs, meters and slider levels.\n"
                           "Theme = the theme's own.")
-    label("Theme keys")
-    tk = segmented("themekeys", ("Palette button", "Top bar strip"), S.theme_keys, CYAN)
-    if tk != S.theme_keys:
-        S.theme_keys = tk
-        save_layout()
-    if imgui.is_item_hovered():
-        imgui.set_tooltip("Quick theme switching from the top bar:\n"
-                          "a palette button at the right, or the row of theme keys after the readout")
     label("Effects view")
     fv = segmented("fxview", ("Cards", "Outline"), S.fx_view, CYAN)
     if fv != S.fx_view:
@@ -1389,7 +1861,7 @@ def interface_section():
     if imgui.is_item_hovered():
         imgui.set_tooltip("Cards: every effect is a card in a grid" + chr(10) +
                           "Outline: a short list of the chain in order; the effect you pick opens below it" + chr(10) +
-                          "(also the list button on the Effects tab)")
+                          "(also the list button above the effects)")
     label("Number boxes")
     nb = segmented("numboxes", ("Off", "On"), S.num_boxes, CYAN)
     if nb != S.num_boxes:
@@ -1463,10 +1935,16 @@ def interface_section():
         save_layout()
     if imgui.is_item_hovered():
         imgui.set_tooltip("Auto adds a column of cards each time the sidebar is wide enough")
-    imgui.text_colored(DIM, "Drag the lines between panels to resize them.")
-    if neon_button(f"{fa.ICON_FA_ROTATE_LEFT}   Reset layout", DIM, V(-1, 0)):
+    if S.layout == 1:
+        imgui.text_colored(DIM, "Drag a panel by its title; its edges snap to the others.")
+    else:
+        imgui.text_colored(DIM, "Drag the lines between panels to resize them.")
+    if neon_button(f"{fa.ICON_FA_ROTATE_LEFT}   Reset layout", DIM, V(-1, 0),
+                   tip="Back to the starting sizes and options (keeps Classic / Custom);" + chr(10) +
+                       "in Custom, puts every panel back in its starting place"):
         for k, v in LAYOUT_DEFAULTS.items():
-            setattr(S, k, v)
+            if k != "layout":
+                setattr(S, k, type(v)(v))   # a copy, so the defaults themselves never change
         save_layout()
 
 
@@ -1559,7 +2037,7 @@ def input_section(app):
         imgui.text_colored(DIM, "Add a Media Layer effect (Sources) to show these.")
 
 
-def audio_section(app):
+def audio_section(app, meters=True):
     label("Input")
     if imgui.begin_combo("##audio", app.audio.device_name or "Off"):
         if imgui.selectable("Off", app.audio.stream is None)[0]:
@@ -1606,6 +2084,12 @@ def audio_section(app):
     _, app.audio.hit_sens = slider_float("##hitsens", app.audio.hit_sens, 0.0, 1.0, "%.2f")
     if imgui.is_item_hovered():
         imgui.set_tooltip("How easily a drum counts as a hit: low = only the clearest hits, high = every little one")
+    if meters:
+        audio_meters(app)
+
+
+def audio_meters(app):
+    """Levels, drum-hit lights and the spectrum (the Meters panel in the Custom layout)."""
     for b, name in (("bass", "Bass"), ("mid", "Mids"), ("high", "Highs")):
         imgui.text_colored(DIM, name)
         imgui.same_line(sc(LABEL_W))
@@ -1840,6 +2324,28 @@ def outline_row(app, f, key, container, depth):
 OUTLINE_LIST_W = 320   # the list's width when the open effects sit beside it
 
 
+def begin_card_table(uid, n):
+    """A row of n card columns that share the width, each at most CARD_MAX_W (then they keep to the left)."""
+    avail = imgui.get_content_region_avail().x
+    cap = sc(CARD_MAX_W)
+    fixed = (avail - 8 * (n - 1)) / n > cap
+    imgui.push_style_var(imgui.StyleVar_.cell_padding, V(4, 4))
+    flags = (imgui.TableFlags_.sizing_fixed_same if fixed else imgui.TableFlags_.sizing_stretch_same) \
+        | imgui.TableFlags_.no_pad_outer_x
+    if not imgui.begin_table(uid, n, flags):
+        imgui.pop_style_var()
+        return False
+    if fixed:
+        for c in range(n):
+            imgui.table_setup_column(f"c{c}", imgui.TableColumnFlags_.width_fixed, cap)
+    return True
+
+
+def end_card_table():
+    imgui.end_table()
+    imgui.pop_style_var()
+
+
 def draw_cards(app, entries):
     """Cards for the open effects, in a grid like the card view (a group takes a full row)."""
     cols = card_columns()
@@ -1848,19 +2354,16 @@ def draw_cards(app, entries):
     def flush():
         if not run:
             return
-        if cols == 1:
+        n = min(cols, len(run))   # fewer open cards than fit side by side: they share the width (up to a limit)
+        if n == 1 and imgui.get_content_region_avail().x <= sc(CARD_MAX_W):
             for f, container, key in run:
                 effect_card(app, f, key, container)
-        else:   # card k goes in column k % cols, so each column stacks its own cards
-            imgui.push_style_var(imgui.StyleVar_.cell_padding, V(4, 4))
-            if imgui.begin_table(f"open{run[0][0].uid}", cols,
-                                 imgui.TableFlags_.sizing_stretch_same | imgui.TableFlags_.no_pad_outer_x):
-                for c in range(cols):
-                    imgui.table_next_column()
-                    for f, container, key in run[c::cols]:
-                        effect_card(app, f, key, container)
-                imgui.end_table()
-            imgui.pop_style_var()
+        elif begin_card_table(f"open{run[0][0].uid}", n):   # card k in column k % n: each column stacks its own
+            for c in range(n):
+                imgui.table_next_column()
+                for f, container, key in run[c::n]:
+                    effect_card(app, f, key, container)
+            end_card_table()
         run.clear()
 
     for f, container, key in entries:
@@ -1918,7 +2421,7 @@ def outline_view(app):
                 if is_group(f):
                     group_card(app, f, key, container, show_children=False)
                 else:
-                    effect_card(app, f, key, container)
+                    draw_cards(app, [(f, container, key)])
         imgui.dummy(V(-1, sc(8)))
         card_drop_target(app.pipe.order, None)
     imgui.pop_style_color()
@@ -1933,20 +2436,17 @@ def draw_items(app, items, top):
     def flush():
         if not run:
             return
-        if cols == 1:
+        if cols == 1 and imgui.get_content_region_avail().x <= sc(CARD_MAX_W):
             for n, f in run:
                 effect_card(app, f, n, items)
-        else:   # masonry: card k goes in column k % cols, so chain order still reads left to right, and
+        elif begin_card_table(f"cards{run[0][1].uid}", cols):
+            # masonry: card k goes in column k % cols, so chain order still reads left to right, and
             # each column stacks its own cards, so a short card never leaves a gap beside a tall one
-            imgui.push_style_var(imgui.StyleVar_.cell_padding, V(4, 4))
-            if imgui.begin_table(f"cards{run[0][1].uid}", cols,
-                                 imgui.TableFlags_.sizing_stretch_same | imgui.TableFlags_.no_pad_outer_x):
-                for c in range(cols):
-                    imgui.table_next_column()
-                    for n, f in run[c::cols]:
-                        effect_card(app, f, n, items)
-                imgui.end_table()
-            imgui.pop_style_var()
+            for c in range(cols):
+                imgui.table_next_column()
+                for n, f in run[c::cols]:
+                    effect_card(app, f, n, items)
+            end_card_table()
         run.clear()
 
     for i, f in enumerate(visible):
@@ -2861,7 +3361,7 @@ def output_section(app):
                           "into the same file. Use Voicemeeter or a loopback input to record what you hear.")
     imgui.end_disabled()
     if app.rec_sound:
-        src = app.audio.device_name if app.audio.stream else "none yet (Effects tab > Audio)"
+        src = app.audio.device_name if app.audio.stream else "none yet (Audio, under Input)"
         imgui.dummy(V(sc(LABEL_W) - 8, 0))
         imgui.same_line()
         imgui.text_colored(DIM, f"from: {src}")
@@ -3079,62 +3579,23 @@ def playlist_panel(app, panel_h):
     imgui.same_line(0, 6)
     imgui.text_colored(alpha(DIM, .6), f"{len(app.playlist)}")
 
-    imgui.same_line(0, 26)
-    if icon_button(fa.ICON_FA_BACKWARD_STEP, "prev", TEXT, "Previous look [Left]") and not app.midi_learn:
-        app.playlist_step(-1)
-    midi_spot(app, ("app", "prev"))
-    imgui.same_line(0, 4)
-    playing = app.auto_mode != AUTO_OFF
-    if neon_button(f"{fa.ICON_FA_PAUSE if playing else fa.ICON_FA_PLAY}##play", CYAN, V(44, 0), playing,
-                   "Auto-play [Space]") and not app.midi_learn:
-        toggle_play(app)
-    midi_spot(app, ("app", "play"))
-    imgui.same_line(0, 4)
-    if icon_button(fa.ICON_FA_FORWARD_STEP, "next", TEXT, "Next look [Right / N]") and not app.midi_learn:
-        app.auto_progress = 0.0
-        app.playlist_step(1) if S.auto_kind == AUTO_PLAYLIST else app.randomize()
-    midi_spot(app, ("app", "next"))
-
-    imgui.same_line(0, 18)
-    kind = segmented("kind", (f"{fa.ICON_FA_LIST}  Playlist", f"{fa.ICON_FA_SHUFFLE}  Random"),
-                     0 if S.auto_kind == AUTO_PLAYLIST else 1, CYAN, sc(210))
-    S.auto_kind = AUTO_PLAYLIST if kind == 0 else AUTO_RANDOM
-    if app.auto_mode:
-        app.auto_mode = S.auto_kind
-
-    imgui.same_line(0, 18)
-    imgui.align_text_to_frame_padding()
-    imgui.text_colored(DIM, "every")
-    imgui.same_line()
-    imgui.set_next_item_width(sc(90))
-    _, app.auto_every = slider_int("##every", app.auto_every, 1, 32)
-    imgui.same_line()
-    app.auto_unit = segmented("unit", tempo.UNITS, app.auto_unit, VIOLET, sc(150))
+    same = lambda w, gap: imgui.same_line(0, gap)
+    transport_buttons(app, same, 26)
+    auto_controls(app, same)
     imgui.same_line(0, 18)
     tempo_strip(app)
 
     # import / export and save, on the right
-    save_w, io_w = sc(130), sc(44)
-    imgui.same_line(imgui.get_window_width() - 16 - save_w - 2 * (io_w + 6))
-    imgui.set_cursor_pos_y(sc(10))
-    if neon_button(f"{fa.ICON_FA_FILE_IMPORT}##import", DIM, V(io_w, 0),
-                   tip="Import: add looks from a .lumoria-look or .lumoria-playlist file to the end of the playlist\n"
-                       "(looks with a name you already use get a number, nothing is overwritten)"):
-        app.ask_import()
-    imgui.same_line(0, 6)
-    imgui.set_cursor_pos_y(sc(10))
-    if neon_button(f"{fa.ICON_FA_FILE_EXPORT}##export", DIM, V(io_w, 0),
-                   tip="Export: save the whole playlist (every look, with its transition and timing) to one\n"
-                       ".lumoria-playlist file, to back it up or share it. One look: right-click its tile."):
-        if app.playlist:
-            app.ask_export()
+    first = [True]
+
+    def at_right(w, gap):
+        if first[0]:
+            first[0] = False
+            imgui.same_line(imgui.get_window_width() - 16 - sc(130))
         else:
-            app.flash("The playlist is empty: save some looks first.")
-    imgui.same_line(0, 6)
-    imgui.set_cursor_pos_y(sc(10))
-    if neon_button(f"{fa.ICON_FA_FLOPPY_DISK}   Save look", MAGENTA, V(save_w, 0),
-                   tip="Save every effect in the chain, with its settings, as a look in the playlist"):
-        S.open_save = True
+            imgui.same_line(0, gap)
+        imgui.set_cursor_pos_y(sc(10))
+    look_file_buttons(app, at_right)
     if S.open_save:   # also requested by the + tile, which lives in a child window
         S.open_save = False
         S.save_name = f"Look {len(app.playlist) + 1}"
@@ -3145,6 +3606,56 @@ def playlist_panel(app, panel_h):
         return
     imgui.spacing()
     tiles(app, panel_h)
+
+
+def transport_buttons(app, nxt, gap=26):
+    """Previous / play / next. nxt(width, gap) places each button (beside the last, or on a new line)."""
+    fh = sc(28)   # icon_button's width
+    nxt(fh, gap)
+    if icon_button(fa.ICON_FA_BACKWARD_STEP, "prev", TEXT, "Previous look [Left]") and not app.midi_learn:
+        app.playlist_step(-1)
+    midi_spot(app, ("app", "prev"))
+    nxt(44, 4)
+    playing = app.auto_mode != AUTO_OFF
+    if neon_button(f"{fa.ICON_FA_PAUSE if playing else fa.ICON_FA_PLAY}##play", CYAN, V(44, 0), playing,
+                   "Auto-play [Space]") and not app.midi_learn:
+        toggle_play(app)
+    midi_spot(app, ("app", "play"))
+    nxt(fh, 4)
+    if icon_button(fa.ICON_FA_FORWARD_STEP, "next", TEXT, "Next look [Right / N]") and not app.midi_learn:
+        app.auto_progress = 0.0
+        app.playlist_step(1) if S.auto_kind == AUTO_PLAYLIST else app.randomize()
+    midi_spot(app, ("app", "next"))
+
+
+def auto_controls(app, nxt):
+    """What auto-play runs (playlist / random) and how often."""
+    nxt(sc(210), 18)
+    kind = segmented("kind", (f"{fa.ICON_FA_LIST}  Playlist", f"{fa.ICON_FA_SHUFFLE}  Random"),
+                     0 if S.auto_kind == AUTO_PLAYLIST else 1, CYAN, sc(210))
+    S.auto_kind = AUTO_PLAYLIST if kind == 0 else AUTO_RANDOM
+    if app.auto_mode:
+        app.auto_mode = S.auto_kind
+
+    sp = imgui.get_style().item_spacing.x
+    nxt(imgui.calc_text_size("every").x + sp + sc(90) + sp + sc(150), 18)   # kept together on one line
+    imgui.align_text_to_frame_padding()
+    imgui.text_colored(DIM, "every")
+    imgui.same_line()
+    imgui.set_next_item_width(sc(90))
+    _, app.auto_every = slider_int("##every", app.auto_every, 1, 32)
+    imgui.same_line()
+    app.auto_unit = segmented("unit", tempo.UNITS, app.auto_unit, VIOLET, sc(150))
+
+
+def look_file_buttons(app, nxt):
+    """Save look (importing and exporting looks: the File menu)."""
+    save_w = sc(130)
+    nxt(save_w, 6)
+    if neon_button(f"{fa.ICON_FA_FLOPPY_DISK}   Save look", MAGENTA, V(save_w, 0),
+                   tip="Save every effect in the chain, with its settings, as a look in the playlist [Ctrl+S]\n"
+                       "Import and export looks: File, top left"):
+        S.open_save = True
 
 
 UNIT_RANGES = [(0.1, 10.0, "%.1f s"), (0.25, 32.0, "%.2g beats"), (0.25, 8.0, "%.2g bars")]
@@ -3183,21 +3694,26 @@ def beat_lights(app, dl, x, cy, r=3.4, gap=11):
     return tp.beats_per_bar * sc(gap)
 
 
-def tempo_strip(app):
-    """Playlist bar: beat lights, the BPM readout, TAP, and when a fired look starts (Launch)."""
+def tempo_strip(app, nxt=None):
+    """Playlist bar: beat lights, the BPM readout, TAP, and when a fired look starts (Launch).
+    nxt(width, gap): the Custom layout's Tempo panel, which wraps onto more lines when narrow."""
     tp = app.tempo
     dl = imgui.get_window_draw_list()
-    p, h = imgui.get_cursor_screen_pos(), imgui.get_frame_height()
+    h = imgui.get_frame_height()
+    if nxt:
+        nxt(tp.beats_per_bar * sc(11) + sc(4), 18)
+    p = imgui.get_cursor_screen_pos()
     w = beat_lights(app, dl, p.x + sc(6), p.y + h / 2)
     imgui.dummy(V(w + sc(4), h))
-    imgui.same_line()
+    step = nxt or (lambda w_, gap: imgui.same_line(0, gap))
     # BPM readout in a recessed window
-    p = imgui.get_cursor_screen_pos()
     text = f"{tp.bpm:5.1f}"
     imgui.push_font(S.mono, 16)
     tw = imgui.calc_text_size(text).x
     imgui.pop_font()
     bw = tw + sc(52)
+    step(bw, -1)
+    p = imgui.get_cursor_screen_pos()
     dl.add_rect_filled(p, V(p.x + bw, p.y + h), u32(LCD_BG), 3)
     dl.add_rect(p, V(p.x + bw, p.y + h), u32(EDGE_LO), 3)
     ty = p.y + (h - imgui.get_text_line_height()) / 2
@@ -3208,17 +3724,18 @@ def tempo_strip(app):
     if imgui.is_item_hovered():
         imgui.set_tooltip(f"Tempo: {tp.bpm:.1f} BPM from {tempo.SOURCES[tp.source]}  (Settings > Tempo)\n"
                           "T taps the tempo, B makes this beat beat 1 of the bar")
-    imgui.same_line(0, 6)
+    step(sc(54), 6)
     if neon_button("TAP##tap", CYAN, V(sc(54), 0), glfw.get_time() - (tp.taps[-1] if tp.taps else -9) < .12,
                    "Tap on the beat a few times to set the tempo [T]") and not app.midi_learn:
         tp.tap(glfw.get_time())
     midi_spot(app, ("app", "tap"))
     # launch quantize too, if there's room before the buttons on the right (always in Settings > Tempo)
-    room = (imgui.get_window_width() - 16 - sc(130) - 2 * (sc(44) + 6)
-            - (imgui.get_item_rect_max().x - imgui.get_window_pos().x))
-    if room < sc(320):
-        return
-    imgui.same_line(0, 14)
+    if nxt is None:
+        room = (imgui.get_window_width() - 16 - sc(130)
+                - (imgui.get_item_rect_max().x - imgui.get_window_pos().x))
+        if room < sc(320):
+            return
+    step(imgui.calc_text_size("launch").x + imgui.get_style().item_spacing.x + sc(240), 14)
     imgui.align_text_to_frame_padding()
     imgui.text_colored(DIM, "launch")
     imgui.same_line()
@@ -3286,7 +3803,7 @@ def tempo_section(app):
     if tp.source == tempo.AUDIO:
         heard = tp.locked_at is not None and time.perf_counter() - tp.locked_at < 2.0
         if not app.audio.stream:
-            imgui.text_colored(DIM, "No audio input (Effects tab > Audio): running steadily at this BPM.")
+            imgui.text_colored(DIM, "No audio input (Audio, under Input): running steadily at this BPM.")
         elif not heard:
             imgui.text_colored(AMBER, f"Listening to {app.audio.device_name} for the beat (a few seconds of music)...")
         elif tp.lock < 0.15:
@@ -3382,12 +3899,12 @@ def thumb_texture(app, name):
     return tex
 
 
-def deck(app):
+def deck(app, panel=False):
     """Beside the tiles: what's cued (or waiting / fading), the crossfader with what's at each end, and Take.
     The fader's start is whichever end it sits nearer once a fade is done, so after a full fade the next look
     comes in on the way back (like A / B decks)."""
     imgui.push_style_var(imgui.StyleVar_.item_spacing, V(4, 3))
-    imgui.begin_child("deck", V(sc(232), 0), imgui.ChildFlags_.borders,
+    imgui.begin_child("deck", V(0 if panel else sc(232), 0), 0 if panel else imgui.ChildFlags_.borders,
                       imgui.WindowFlags_.no_scrollbar | imgui.WindowFlags_.no_scroll_with_mouse)
     on_air = app.xf_live[0] if app.xf_live else app.current_preset
     left, right = (on_air, app.cued) if app.xf_dir > 0 else (app.cued, on_air)
@@ -3444,12 +3961,13 @@ def deck(app):
     imgui.pop_style_var()
 
 
-def tiles(app, panel_h):
+def tiles(app, panel_h, with_deck=True):
     # fixed-size tiles that wrap into more rows as the panel gets taller (scroll for the rest)
     th = sc(96)
     tile = V(th * 1.6, th)
-    deck(app)
-    imgui.same_line(0, 10)
+    if with_deck:   # the Custom layout has the deck in a panel of its own
+        deck(app)
+        imgui.same_line(0, 10)
     imgui.begin_child("tiles", V(0, 0))
     per_row = max(1, int((imgui.get_content_region_avail().x + 10) // (tile.x + 10)))
     move = None

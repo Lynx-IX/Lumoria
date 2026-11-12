@@ -434,8 +434,10 @@ def window_label(title, exe):
 
 
 class WindowSource(_ThreadedSource):
-    """Live capture of one window's inside (no title bar). Fast grabs it from the screen (the window must be visible);
-    otherwise PrintWindow asks the window to draw itself, which works while covered but is slow for big windows."""
+    """Live capture of one window's inside (no title bar). Fast grabs it from the screen (the window must be visible).
+    Behind others takes the window's own picture with Windows Graphics Capture (works while covered, and for browser
+    video), or where that can't start, PrintWindow (asks the window to draw itself: slow for big windows, and some
+    windows draw black for it - then it falls back to the screen)."""
 
     def __init__(self, hwnd, title, max_width=2560, fps=30, fast=False):
         self.hwnd, self.title, self.max_width, self.target_fps = hwnd, title, max_width, fps
@@ -467,7 +469,83 @@ class WindowSource(_ThreadedSource):
         _user32.ReleaseDC(self.hwnd, wdc)
         return buf[:, :, :3]
 
+    def _frame_bounds(self):
+        """The window as the compositor sees it (what Windows Graphics Capture hands over): left, top, right, bottom."""
+        r = wintypes.RECT()
+        try:   # DWMWA_EXTENDED_FRAME_BOUNDS: without the invisible resize border
+            ctypes.windll.dwmapi.DwmGetWindowAttribute(wintypes.HWND(self.hwnd), 9, ctypes.byref(r), ctypes.sizeof(r))
+        except OSError:
+            _user32.GetWindowRect(self.hwnd, ctypes.byref(r))
+        return r.left, r.top, r.right, r.bottom
+
+    def _inside(self, img):
+        """Just the inside of the window (no title bar or frame) out of a whole-window picture."""
+        left, top, right, bottom = self._frame_bounds()
+        x, y, w, h = self._client_rect()
+        fw, fh = right - left, bottom - top
+        if fw <= 0 or fh <= 0 or w < 2 or h < 2:
+            return img
+        sx, sy = img.shape[1] / fw, img.shape[0] / fh   # (the picture can be scaled from the window's own size)
+        x0, y0 = max(0, round((x - left) * sx)), max(0, round((y - top) * sy))
+        x1, y1 = min(img.shape[1], x0 + round(w * sx)), min(img.shape[0], y0 + round(h * sy))
+        return img[y0:y1, x0:x1] if x1 - x0 > 1 and y1 - y0 > 1 else img
+
+    def _run_wgc(self):
+        """Behind others, by Windows Graphics Capture (OBS's "Windows 10 (1903 and up)" window capture): the window's
+        own picture straight from the compositor, so it keeps working while other windows cover it, and it sees
+        hardware-drawn video (a browser playing full screen) that PrintWindow only sees as black. Returns False if it
+        can't start here (then PrintWindow is used)."""
+        try:
+            from windows_capture import WindowsCapture
+            cap = WindowsCapture(cursor_capture=False, draw_border=False, window_hwnd=int(self.hwnd),
+                                 minimum_update_interval=max(1, int(1000 / self.target_fps)))
+        except Exception:
+            return False
+        closed = threading.Event()
+        count = dict(n=0, t0=time.perf_counter())
+
+        @cap.event
+        def on_frame_arrived(frame, control):
+            if self._stop.is_set():
+                control.stop()
+                return
+            if self.paused:
+                return
+            img = self._inside(frame.frame_buffer)
+            if self.crop:
+                img = crop_frame(img, self.crop)
+            self._push(np.ascontiguousarray(shrink(img[:, :, :3], self.max_width)), cropped=True)
+            count["n"] += 1
+            if time.perf_counter() - count["t0"] >= 1:
+                self.fps = count["n"] / (time.perf_counter() - count["t0"])
+                count["n"], count["t0"] = 0, time.perf_counter()
+
+        @cap.event
+        def on_closed():
+            closed.set()
+
+        try:
+            control = cap.start_free_threaded()
+        except Exception:
+            return False
+        self.method = "wgc"
+        while not self._stop.is_set() and not closed.is_set():
+            if not _user32.IsWindow(self.hwnd):
+                self.error = f'The window "{self.title}" was closed'
+                break
+            if self.paused or time.perf_counter() - count["t0"] > 2:   # resting, or nothing changed for a while
+                self.fps = 0.0 if self.paused else self.fps
+            time.sleep(0.1)
+        try:
+            control.stop()
+        except Exception:
+            pass
+        return True
+
     def _run(self):
+        if not self.fallback and self._run_wgc():   # Behind others: Windows Graphics Capture where it works
+            return
+        self.method = "screen" if self.fallback else "print"
         grabber = ScreenGrabber(self.target_fps)
         period, n, t0 = 1 / self.target_fps, 0, time.perf_counter()
         while not self._stop.is_set():

@@ -122,12 +122,16 @@ They live in `samples/`; the welcome (Settings > About > Show the welcome again)
   **Make main** (the arrow key beside Source 2, 3 or 4) swaps that source with the main one - both keep running,
   with their crop and person mask setting - and the new main source comes in with the sidebar's *Transitions*
   setting (Dissolve or Grow over its time, or Cut). Put it on a MIDI pad: MIDI learn, then click the arrow.
+  Filling Source 2-4 doesn't put it in the picture by itself: a Media Layer set to it does (or a group starting from
+  it, or Make main). Under each one the Input card says what shows it ("in the picture: Media Layer A") or "ready, not
+  in the picture" - a look can bring a Media Layer with it, so this tells you why a source appeared.
   Screens and windows capture at 30 or 60 fps. Capture uses DXGI desktop duplication (the same method as OBS's
-  Display Capture: very little CPU), so a full 1440p screen keeps up at 60. Windows have *Fast* (cut from that
-  screen capture, so anything over the window shows too) or *Behind others* (the window's own picture through
-  Windows Graphics Capture, like OBS's window capture: other windows on top don't show, and browser video - e.g.
-  YouTube full screen - works; where Windows Graphics Capture isn't available it falls back to the older, slower way). The self-test reports whether fast capture works on a PC; where it doesn't, capture falls back to the
-  older way (about 30 fps).
+  Display Capture: very little CPU), so a full 1440p screen keeps up at 60. Windows are captured *Behind others* (the
+  default: the window's own picture through Windows Graphics Capture, like OBS's window capture - other windows on top
+  don't show, and browser video such as YouTube full screen works; where Windows Graphics Capture isn't available it
+  falls back to an older, slower way) or *Fast* (cut from that screen capture, so anything over the window shows
+  too, but the cheapest). The self-test reports whether fast capture works on a PC; where it doesn't, capture falls
+  back to the older way (about 30 fps).
   Add a *Media Layer* effect (Sources) to put one into the chain: Fill / Fit inside / Stretch, size, position
   (Centre or Pick), rotation, rounded corners, neon border, and *Show: Person only (AI)* to place just the person
   from that source (its own person mask). Fill + *Apply to: Background* puts a video behind you (that uses the

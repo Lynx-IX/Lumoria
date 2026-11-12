@@ -2181,7 +2181,9 @@ def source_picker(app, target, desc, src):
                          sc(130) if kind == "window" else -1)
         if imgui.is_item_hovered():
             imgui.set_tooltip("60 is smoother but costs more processor time (a small crop is cheap)")
-        method = "compatible" if desc.get("method") == "compatible" else "smooth"
+        # a window is captured Behind others unless set to Fast (other windows over it then stay out of the picture)
+        default_m = "compatible" if kind == "window" else "smooth"
+        method = desc.get("method") if desc.get("method") in ("smooth", "compatible") else default_m
         if kind == "window":
             imgui.same_line(0, 6)
             m = segmented(f"meth{target}", ("Fast", "Behind others"), 0 if method == "smooth" else 1, VIOLET)
@@ -2191,12 +2193,26 @@ def source_picker(app, target, desc, src):
                                   "capture): windows over it don't show, and browser video works - use this for a\n"
                                   "full-screen YouTube or a game with other windows on that screen")
             method = ("smooth", "compatible")[m]
-        if (30, 60)[rate] != desc.get("fps", 30) or method != desc.get("method", "smooth"):
+        if (30, 60)[rate] != desc.get("fps", 30) or method != desc.get("method", default_m):
             app.choose_source(target, {**desc, "fps": (30, 60)[rate], "method": method})
     if src is not None and getattr(src, "fps", 0) and kind in ("camera", "screen", "window"):
         imgui.dummy(V(sc(LABEL_W) - 8, 0))
         imgui.same_line()
         imgui.text_colored(DIM, f"receiving {src.fps:.0f} fps")
+    if target != "main":   # what puts this source in the picture (nothing: it's ready, but not shown)
+        users = app.slot_users(target)
+        imgui.dummy(V(sc(LABEL_W) - 8, 0))
+        imgui.same_line()
+        if users:
+            imgui.text_colored(CYAN, f"{fa.ICON_FA_LAYER_GROUP}  in the picture: {', '.join(users)}")
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("This source shows through these layers in the effect chain (they came with the look,\n"
+                                  "or you added them). Turn the layer off or set it to another source to take it out.")
+        elif kind != "none":
+            imgui.text_colored(alpha(DIM, .7), "ready, not in the picture")
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("Nothing shows this source yet. To use it: add a Media Layer effect (Sources) set to\n"
+                                  "it, start a group from it, or make it the main source (the arrow key).")
 
 
 def person_mask_running(app, target):

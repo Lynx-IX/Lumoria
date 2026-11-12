@@ -677,5 +677,5 @@ def _open_source(desc, cameras):
         if hwnd is None:
             return _Missing(f'The window "{desc["title"]}" isn\'t open')
         desc["hwnd"] = hwnd
-        return WindowSource(hwnd, desc["title"], fps=desc.get("fps", 30), fast=desc.get("method") != "compatible")
+        return WindowSource(hwnd, desc["title"], fps=desc.get("fps", 30), fast=desc.get("method") == "smooth")   # Behind others unless Fast
     return None

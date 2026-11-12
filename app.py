@@ -1336,6 +1336,23 @@ class App:
             self.extra_desc[target] = desc
             self.extra[target] = open_source(desc, self.cameras) if desc.get("kind") != "test" else None
             self.pipe.upload_media(target, None)
+            users = self.slot_users(target)
+            if users and desc.get("kind", "none") != "none":   # it goes straight into the picture: say where
+                self.flash(f"Source {target + 2} is now showing in {', '.join(users)}", 4)
+
+    def slot_users(self, slot):
+        """The names of what's showing Source 2-4 (slot 0-2) in the chain: Media Layers set to it, groups starting
+        from it (only the ones that are on)."""
+        names = []
+        for f in walk(self.pipe.order):
+            if f.removing or not f.on:
+                continue
+            if isinstance(f, Group):
+                if f.source == slot:
+                    names.append(f"group {f.name}")
+            elif f.id.startswith("media_") and f.opts[0] == slot:
+                names.append(f.name)
+        return names
 
     def source_of(self, target):
         return (self.source, self.source_desc) if target == "main" else (self.extra[target], self.extra_desc[target])

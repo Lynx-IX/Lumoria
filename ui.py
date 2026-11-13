@@ -1870,7 +1870,8 @@ def settings_list(app):
 
 
 CREDITS = [   # what LumaTRX is built with, and their licences (shown in Settings > About)
-    ("Robust Video Matting (AI mask model)", "GPL-3.0"), ("ONNX Runtime + DirectML", "MIT"),
+    ("Robust Video Matting (AI mask model)", "GPL-3.0"), ("U-2-Net small (Subject mask model)", "Apache-2.0"),
+    ("ONNX Runtime + DirectML", "MIT"),
     ("Dear ImGui / imgui-bundle", "MIT"), ("ModernGL", "MIT"), ("GLFW / pyGLFW", "zlib / MIT"),
     ("PyOpenGL", "BSD"), ("OpenCV", "Apache-2.0"), ("NumPy", "BSD"), ("sounddevice / PortAudio", "MIT"),
     ("mss", "MIT"), ("cv2-enumerate-cameras", "MIT"),
@@ -2174,6 +2175,8 @@ def source_picker(app, target, desc, src):
         if icon_button(fa.ICON_FA_CROP_SIMPLE, f"crop{target}", MAGENTA if editing else (CYAN if cropped else DIM),
                        "Crop: drag a box on the preview to keep just part of this source"):
             app.finish_crop(False) if editing else app.start_crop(target)
+    if maskable:
+        slow_mask_note(app, target, desc)
     if kind in ("screen", "window"):   # capture rate, and for windows how it's grabbed
         imgui.dummy(V(sc(LABEL_W) - 8, 0))
         imgui.same_line()
@@ -2216,35 +2219,76 @@ def source_picker(app, target, desc, src):
 
 
 def person_mask_running(app, target):
-    """This source's person mask is working right now."""
+    """This source's AI mask (person or subject) is working right now."""
     if target == "main":
         return app.pipe.mask_active
     sm = app.pipe.slot_masks[target]
     return bool(sm and sm.active)
 
 
+def source_segmenter(app, target):
+    return app.segmenter if target == "main" else app.slot_segs[target]
+
+
+# a source's AI mask: (value kept in the source's description, icon, name, what it does)
+MASK_KINDS = [
+    (None, fa.ICON_FA_USER, "Person", "Finds people. The best edges for a person (the default)"),
+    ("subject", fa.ICON_FA_SHAPES, "Subject",
+     "Finds whatever the picture is about: a pet, an animal, an object, a person.\n"
+     "Best with one clear subject; in a busy scene it may pick the wrong thing"),
+    ("off", fa.ICON_FA_USER_SLASH, "Off",
+     "Nothing is looked for: effects that use the mask treat the whole picture as the person.\n"
+     "Saves GPU, e.g. for a screen or a game"),
+]
+
+
 def person_mask_button(app, target, desc):
-    """A source's Person mask: Auto (the AI finds the person whenever something needs it; lit while it runs) or
-    Off (never: anything that asks treats the whole picture as the person). Kept in the source's description."""
-    off = desc.get("mask") == "off"
-    running = not off and person_mask_running(app, target)
+    """A source's AI mask: Person (the default), Subject, or Off - a small menu. The mask only runs when something
+    needs it (an effect that uses it, Cut out, a Media Layer showing just the person); lit while it runs."""
+    value = desc.get("mask") if desc.get("mask") in ("subject", "off") else None
+    _, icon, title, _ = next(k for k in MASK_KINDS if k[0] == value)
+    running = value != "off" and person_mask_running(app, target)
     name = "the main source" if target == "main" else f"Source {target + 2}"
-    if off:
-        tip = (f"Person mask: Off for {name}.\nNothing looks for a person in it: effects that use the mask (Background,\n"
-               "Apply to, person outlines, Cut out / Person only) treat the whole picture as the person.\nClick for Auto")
-    else:
-        tip = (f"Person mask: Auto for {name} - " + ("running now" if running else "idle, nothing needs it yet") +
-               ".\nThe AI finds the person whenever an effect needs it (lit while it runs).\n"
-               "Click for Off (saves GPU, e.g. for a screen or a game with nobody in it)")
-    if icon_button(fa.ICON_FA_USER_SLASH if off else fa.ICON_FA_USER, f"pmask{target}",
-                   AMBER if off else (CYAN if running else alpha(DIM, .7)), tip):
-        if off:
-            desc.pop("mask", None)
-        else:
-            desc["mask"] = "off"
+    state = "Off" if value == "off" else ("running now" if running else "idle, nothing needs it yet")
+    tip = (f"AI mask for {name}: {title} - {state}.\nIt runs only when an effect needs it (Background, Apply to, "
+           "outlines,\nCut out, Media Layer person only). Click to choose Person, Subject or Off")
+    if icon_button(icon, f"pmask{target}", AMBER if value == "off" else (CYAN if running else alpha(DIM, .7)), tip):
+        imgui.open_popup(f"maskmenu{target}")
     if running:
         mn, mx = imgui.get_item_rect_min(), imgui.get_item_rect_max()
         led(imgui.get_window_draw_list(), V(mx.x - 5, mn.y + 5), CYAN, True, 2.2)
+    if imgui.begin_popup(f"maskmenu{target}"):
+        imgui.text_colored(DIM, f"AI mask for {name}")
+        for val, ic, ttl, what in MASK_KINDS:
+            if imgui.selectable(f"{ic}   {ttl}##mk{target}{ttl}", val == value)[0]:
+                if val is None:
+                    desc.pop("mask", None)
+                else:
+                    desc["mask"] = val
+            if imgui.is_item_hovered():
+                imgui.set_tooltip(what)
+        imgui.end_popup()
+
+
+def slow_mask_note(app, target, desc):
+    """Under a source: its AI mask can't keep up on this computer. Only the cut-out edge lags (the picture and the
+    effects stay smooth), so it's a note with a way out, never a switch made behind the user's back."""
+    seg = source_segmenter(app, target)
+    if not (seg and person_mask_running(app, target) and seg.slow()):
+        return
+    imgui.dummy(V(sc(LABEL_W) - 8, 0))
+    imgui.same_line()
+    what = "Subject" if seg.kind == "subject" else "Person"
+    imgui.text_colored(AMBER, f"{fa.ICON_FA_TRIANGLE_EXCLAMATION}  Mask slow here (~{1000 / max(seg.ms_avg, 1):.0f} fps)")
+    if imgui.is_item_hovered():
+        imgui.set_tooltip(f"This computer takes about {seg.ms_avg:.0f} ms per {what.lower()} mask, so the cut-out edge "
+                          "lags a little behind\nthe picture (the picture and the effects stay smooth)." +
+                          ("\nPerson is faster, if it's a person you're after." if seg.kind == "subject" else
+                           "\nA lower AI mask quality (Settings -> Person detection) makes it faster."))
+    if seg.kind == "subject":
+        imgui.same_line(0, sc(6))
+        if imgui.small_button(f"Use Person##slow{target}"):
+            desc.pop("mask", None)
 
 
 def input_section(app):
@@ -3752,7 +3796,7 @@ def custom_colours(f, j):
 
 def mask_section(app):
     """Person detection: how the AI person mask is made (for every source that uses one): quality, edge, stability,
-    the captured background. Each source's own on / off is its Person mask switch in the Input card."""
+    the captured background. Each source's own Person / Subject / Off is its AI mask button in the Input card."""
     p = app.pipe
     label("Quality")
     q = segmented("mq", [name for name, _w, _r in SEG_QUALITY], app.mask_quality, MAGENTA)

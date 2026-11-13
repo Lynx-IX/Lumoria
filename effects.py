@@ -414,7 +414,7 @@ def _media(letter, default_source):
                 params=[("Rotate", 0., -180., 180., "%.0f deg"), ("Rounded", 0.), ("Neon border", 0.)],
                 options=[("Source", ["Source 2", "Source 3", "Source 4"], default_source),
                          ("Fit", ["Fill frame", "Fit inside", "Stretch"], 1),
-                         ("Show", ["Whole picture", "Person only (AI)"], 0)],
+                         ("Show", ["Whole picture", "Person / subject only (AI)"], 0)],
                 code=MEDIA_LAYER)
 
 # Neon Edges passes. Detail = less pre-blur (more fine edges, more noise); Threshold = how strong an edge

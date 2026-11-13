@@ -40,7 +40,20 @@ from audio import AudioAnalyzer, list_inputs
 from shared import (AUTO_OFF, AUTO_PLAYLIST, AUTO_RANDOM, DATA, FROZEN, HERE, LOOK_MORPH, MOD_AUDIO, MOD_OFF, MOD_WAVE,
                     RESOLUTIONS, TRANSITIONS, VERSION, save_json, save_text)
 from lookcheck import clean_look, clean_meta, clean_thumb
-from segment import MODEL as SEG_MODEL, QUALITY as SEG_QUALITY, Segmenter
+from segment import MODELS as SEG_MODELS, QUALITY as SEG_QUALITY, Segmenter
+
+
+def mask_kind(desc):
+    """A source's AI mask setting: "person" (the default), "subject" (whatever the picture is about: a pet, an
+    object...) or None (Off). Kept in the source's description as "mask"."""
+    m = desc.get("mask")
+    return None if m == "off" else ("subject" if m == "subject" else "person")
+
+
+def new_segmenter(kind):
+    seg = Segmenter(os.path.join(HERE, "models", SEG_MODELS[kind]), kind)
+    seg.start()
+    return seg
 import midi
 import recorder
 import sources
@@ -2986,7 +2999,7 @@ class App:
                 need.add(g.source)
             elif not isinstance(g, Group) and g.id.startswith("media_") and g.on and not g.removing and g.opts[2] == 1:
                 need.add(g.opts[0])   # a Media Layer showing only the person from its source
-        need -= {slot for slot in range(3) if self.extra_desc[slot].get("mask") == "off"}   # Person mask: Off
+        need -= {slot for slot in range(3) if mask_kind(self.extra_desc[slot]) is None}   # AI mask: Off
         p = self.pipe
         for slot in range(3):
             sm = p.slot_masks[slot]
@@ -2996,9 +3009,12 @@ class App:
                 continue
             if sm is None:
                 sm = p.slot_masks[slot] = SourceMask(p.ctx, p.size, p.seg_small.tex.size)
+            kind = mask_kind(self.extra_desc[slot])
+            if self.slot_segs[slot] is not None and self.slot_segs[slot].kind != kind:   # switched Person <-> Subject
+                self.slot_segs[slot].stop()
+                self.slot_segs[slot] = None
             if self.slot_segs[slot] is None:
-                self.slot_segs[slot] = Segmenter(os.path.join(HERE, "models", SEG_MODEL))
-                self.slot_segs[slot].start()
+                self.slot_segs[slot] = new_segmenter(kind)
             sm.active = True
             seg = self.slot_segs[slot]
             seg.ratio = SEG_QUALITY[self.mask_quality][2]
@@ -3011,15 +3027,19 @@ class App:
     def update_segmenter(self):
         """Start the person segmenter when an effect needs it (unless the main source's Person mask is Off);
         bring in its newest mask."""
-        self.pipe.mask_off = self.source_desc.get("mask") == "off"
+        kind = mask_kind(self.source_desc)
+        self.pipe.mask_off = kind is None
         self.pipe.mask_active = not self.pipe.mask_off and self.mask_needed()
         if not self.pipe.mask_active:
             return None
+        if self.segmenter is not None and self.segmenter.kind != kind:   # switched Person <-> Subject
+            self.segmenter.stop()
+            self.segmenter, self.seg_error_shown = None, False
         if self.segmenter is None:
-            self.segmenter = Segmenter(os.path.join(HERE, "models", SEG_MODEL))
+            self.segmenter = Segmenter(os.path.join(HERE, "models", SEG_MODELS[kind]), kind)
             self.segmenter.ratio = SEG_QUALITY[self.mask_quality][2]
             self.segmenter.start()
-            self.flash("Loading background removal...", 3)
+            self.flash("Loading the subject mask..." if kind == "subject" else "Loading background removal...", 3)
         seg = self.segmenter
         if seg.error and not self.seg_error_shown:
             self.flash(seg.error, 10)
@@ -3200,12 +3220,20 @@ def run_selftest(app, frame):
         for fid in ("cutout", "edges"):
             app.add_effect(by_id[fid])
         app.toggle_spout(True)
+        app.selftest_subject = new_segmenter("subject")   # the Subject mask model too (no source needs it here)
+    subj = app.selftest_subject
+    if subj.wants_frame():
+        subj.submit(np.random.randint(0, 255, (180, 320, 3), np.uint8))
+    subj.take_mask()
     if frame < 300:
         return False
+    subj.stop()
     seg = app.segmenter
     report = dict(frozen=FROZEN, fps=app.fps, effects_compiled=len(app.pipe.effects),
                   ai_mask_loaded=bool(seg and seg.loaded), ai_mask_error=seg.error if seg else "not started",
                   ai_mask_ms=round(seg.ms, 1) if seg else None,
+                  subject_mask_loaded=subj.loaded and subj.ms > 0, subject_mask_error=subj.error,
+                  subject_mask_ms=round(subj.ms, 1),
                   spout=bool(app.spout and not app.spout.error), midi_ports=[n for n, h, _ in app.midi.ports if h],
                   font_ok=bool(ui.S.mono), logo_ok=bool(ui.S.brand), fast_capture=sources.fast_capture_ok(),
                   recording=app.recorder.found, what_you_hear=selftest_loopback())
@@ -3224,6 +3252,9 @@ def run_selftest(app, frame):
                  f"AI mask:         {ok(report['ai_mask_loaded'])}" + (f"  ({report['ai_mask_ms']} ms per mask)"
                                                                        if report["ai_mask_loaded"] else
                                                                        f"  {report['ai_mask_error']}"),
+                 f"Subject mask:    {ok(report['subject_mask_loaded'])}" + (
+                     f"  ({report['subject_mask_ms']} ms per mask)" if report["subject_mask_loaded"] else
+                     f"  {report['subject_mask_error'] or ''}"),
                  f"Spout:           {ok(report['spout'])}",
                  f"Screen capture:  {'60 fps (fast)' if report['fast_capture'] else 'standard (about 30 fps)'}",
                  f"What you hear:   {ok(report['what_you_hear'])}",

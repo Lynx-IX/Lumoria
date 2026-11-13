@@ -143,10 +143,16 @@ They live in `samples/`; the welcome (Settings > About > Show the welcome again)
 - **Person mask and Person detection:** the AI finds the person in a source (the *person mask*). It changes nothing
   by itself; it's what the *Background* effect (replace or remove the background), every effect's *Apply to*,
   Tracers, Neon Edges' person outline, a source group's *Cut out person* and a Media Layer's *Person only* use.
-  - Each source in the Input card has a **person button** beside it: *Auto* (the default: the mask runs only while
-    something needs it, and the button lights while it does) or *Off* (never, e.g. for a screen or game with nobody
-    in it; anything that asks then treats the whole picture as the person). Each of Sources 2-4 has its own mask,
-    for its source group or Media Layer.
+  - Each source in the Input card has an **AI mask button** beside it, a small menu:
+    - *Person* (the default): finds people, with the best edges for a person.
+    - *Subject*: finds whatever the picture is about - a pet, an animal, an object (a guitar, a mug) or a person.
+      Best with one clear subject; in a busy scene it may pick the wrong thing. It uses a small U-2-Net model.
+    - *Off*: never looks (e.g. for a screen or game with nobody in it); anything that asks then treats the whole
+      picture as the person.
+
+    The mask runs only while something needs it, and the button lights while it does. Each of Sources 2-4 has its
+    own mask, for its source group or Media Layer. If a computer can't make the masks fast enough, a note under the
+    source says so (only the cut-out edge lags; the picture stays smooth), with *Use Person* for a Subject mask.
   - *Settings → Person detection* sets how the masks are made, for every source: quality (Fast / Balanced / High /
     Max), Edge refine (a guided filter that snaps the AI's edge onto the real edges in the picture), Stability (less
     edge flicker) and the captured background. *Show mask on preview* helps tuning.
